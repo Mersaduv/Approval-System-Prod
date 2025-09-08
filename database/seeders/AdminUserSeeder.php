@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\User;
 use App\Models\Department;
+use App\Models\Role;
 use Illuminate\Support\Facades\Hash;
 
 class AdminUserSeeder extends Seeder
@@ -14,13 +15,17 @@ class AdminUserSeeder extends Seeder
      */
     public function run(): void
     {
+        // Get roles
+        $adminRole = Role::where('name', 'admin')->first();
+        $managerRole = Role::where('name', 'manager')->first();
+        $employeeRole = Role::where('name', 'employee')->first();
+
         // Create a default department if it doesn't exist
         $department = Department::firstOrCreate(
             ['name' => 'IT Department'],
             [
                 'description' => 'Information Technology Department',
-                'budget_limit' => 100000,
-                'approval_required' => true
+                'role_id' => $adminRole->id
             ]
         );
 
@@ -31,8 +36,8 @@ class AdminUserSeeder extends Seeder
                 'full_name' => 'System Administrator',
                 'password' => Hash::make('password123'),
                 'department_id' => $department->id,
-                'role' => 'Admin',
-                'permissions' => json_encode(['*']) // All permissions
+                'role_id' => $adminRole->id,
+                'permissions' => ['*'] // All permissions
             ]
         );
 
@@ -43,8 +48,8 @@ class AdminUserSeeder extends Seeder
                 'full_name' => 'Test Employee',
                 'password' => Hash::make('password123'),
                 'department_id' => $department->id,
-                'role' => 'Employee',
-                'permissions' => json_encode(['submit_requests', 'view_all_requests'])
+                'role_id' => $employeeRole->id,
+                'permissions' => ['submit_requests', 'view_own_requests']
             ]
         );
 
@@ -55,8 +60,8 @@ class AdminUserSeeder extends Seeder
                 'full_name' => 'Department Manager',
                 'password' => Hash::make('password123'),
                 'department_id' => $department->id,
-                'role' => 'Manager',
-                'permissions' => json_encode(['submit_requests', 'approve_requests', 'view_all_requests', 'manage_team'])
+                'role_id' => $managerRole->id,
+                'permissions' => ['submit_requests', 'approve_requests', 'view_all_requests', 'manage_team']
             ]
         );
     }

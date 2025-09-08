@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\Admin\ApprovalRuleController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\UserController;
+use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\ReportsController;
 
 /*
@@ -20,12 +21,15 @@ use App\Http\Controllers\ReportsController;
 |
 */
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
+Route::middleware(['web', 'auth'])->get('/user', function (Request $request) {
+    return response()->json([
+        'success' => true,
+        'data' => $request->user()->load('role')
+    ]);
 });
 
 // Request routes
-Route::middleware('auth:sanctum')->group(function () {
+Route::middleware(['web', 'auth'])->group(function () {
     // Request management
     Route::get('/requests', [RequestController::class, 'index']);
     Route::post('/requests', [RequestController::class, 'store']);
@@ -48,7 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
 });
 
 // Admin routes
-Route::middleware('auth:sanctum')->prefix('admin')->group(function () {
+Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     // Department management
     Route::get('/departments', [DepartmentController::class, 'index']);
     Route::post('/departments', [DepartmentController::class, 'store']);
@@ -68,6 +72,15 @@ Route::middleware('auth:sanctum')->prefix('admin')->group(function () {
     Route::put('/users/{id}/permissions', [UserController::class, 'updatePermissions']);
     Route::get('/users/stats/overview', [UserController::class, 'getStats']);
 
+    // Role management
+    Route::get('/roles', [RoleController::class, 'index']);
+    Route::post('/roles', [RoleController::class, 'store']);
+    Route::get('/roles/{id}', [RoleController::class, 'show']);
+    Route::put('/roles/{id}', [RoleController::class, 'update']);
+    Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
+    Route::get('/roles/permissions/available', [RoleController::class, 'getPermissions']);
+    Route::put('/roles/{id}/permissions', [RoleController::class, 'updatePermissions']);
+
     // Approval rules management
     Route::get('/approval-rules', [ApprovalRuleController::class, 'index']);
     Route::post('/approval-rules', [ApprovalRuleController::class, 'store']);
@@ -80,7 +93,7 @@ Route::middleware('auth:sanctum')->prefix('admin')->group(function () {
 });
 
 // Reporting routes
-Route::middleware('auth:sanctum')->prefix('reports')->group(function () {
+Route::middleware(['web', 'auth'])->prefix('reports')->group(function () {
     Route::get('/dashboard-stats', [ReportsController::class, 'dashboardStats']);
     Route::get('/requests-by-department', [ReportsController::class, 'requestsByDepartment']);
     Route::get('/requests-by-user', [ReportsController::class, 'requestsByUser']);

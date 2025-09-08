@@ -15,7 +15,7 @@ class DepartmentController extends Controller
     public function __construct()
     {
         $this->middleware(function ($request, $next) {
-            if (Auth::user()->role !== 'Admin') {
+            if (Auth::user()->role->name !== 'admin') {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. Admin access required.'
@@ -30,7 +30,7 @@ class DepartmentController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Department::withCount(['users', 'approvalRules']);
+        $query = Department::withCount(['users', 'approvalRules'])->with('role');
 
         // Search by name
         if ($request->has('search')) {
@@ -52,7 +52,8 @@ class DepartmentController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:departments,name',
-            'description' => 'nullable|string|max:1000'
+            'description' => 'nullable|string|max:1000',
+            'role_id' => 'required|exists:roles,id'
         ]);
 
         if ($validator->fails()) {
@@ -107,7 +108,8 @@ class DepartmentController extends Controller
 
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:departments,name,' . $id,
-            'description' => 'nullable|string|max:1000'
+            'description' => 'nullable|string|max:1000',
+            'role_id' => 'required|exists:roles,id'
         ]);
 
         if ($validator->fails()) {

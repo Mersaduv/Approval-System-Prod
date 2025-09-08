@@ -6,6 +6,7 @@ use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 use App\Models\Department;
 use App\Models\User;
+use App\Models\Role;
 use App\Models\ApprovalRule;
 use Illuminate\Support\Facades\Hash;
 
@@ -16,16 +17,24 @@ class WorkflowSeeder extends Seeder
      */
     public function run(): void
     {
+        // Get roles
+        $adminRole = Role::where('name', 'admin')->first();
+        $managerRole = Role::where('name', 'manager')->first();
+        $employeeRole = Role::where('name', 'employee')->first();
+
         // Create departments
         $departments = [
-            ['name' => 'IT Department', 'description' => 'Information Technology Department'],
-            ['name' => 'Finance Department', 'description' => 'Financial Management Department'],
-            ['name' => 'HR Department', 'description' => 'Human Resources Department'],
-            ['name' => 'Operations Department', 'description' => 'Operations Management Department'],
+            ['name' => 'IT Department', 'description' => 'Information Technology Department', 'role_id' => $adminRole->id],
+            ['name' => 'Finance Department', 'description' => 'Financial Management Department', 'role_id' => $managerRole->id],
+            ['name' => 'HR Department', 'description' => 'Human Resources Department', 'role_id' => $managerRole->id],
+            ['name' => 'Operations Department', 'description' => 'Operations Management Department', 'role_id' => $employeeRole->id],
         ];
 
         foreach ($departments as $dept) {
-            Department::create($dept);
+            Department::firstOrCreate(
+                ['name' => $dept['name']],
+                $dept
+            );
         }
 
         // Create users
@@ -36,17 +45,17 @@ class WorkflowSeeder extends Seeder
                 'email' => 'admin@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 1,
-                'role' => 'Admin',
-                'permissions' => json_encode(['*'])
+                'role_id' => $adminRole->id,
+                'permissions' => ['*']
             ],
-            // CEO
+            // CEO (Admin role)
             [
                 'full_name' => 'Chief Executive Officer',
                 'email' => 'ceo@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 1,
-                'role' => 'CEO',
-                'permissions' => json_encode(['approve_high_value', 'view_all_requests'])
+                'role_id' => $adminRole->id,
+                'permissions' => ['*']
             ],
             // IT Manager
             [
@@ -54,8 +63,8 @@ class WorkflowSeeder extends Seeder
                 'email' => 'it.manager@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 1,
-                'role' => 'Manager',
-                'permissions' => json_encode(['approve_requests', 'manage_team'])
+                'role_id' => $managerRole->id,
+                'permissions' => ['approve_requests', 'manage_team']
             ],
             // Finance Manager
             [
@@ -63,8 +72,8 @@ class WorkflowSeeder extends Seeder
                 'email' => 'finance.manager@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 2,
-                'role' => 'Manager',
-                'permissions' => json_encode(['approve_requests', 'manage_team'])
+                'role_id' => $managerRole->id,
+                'permissions' => ['approve_requests', 'manage_team']
             ],
             // Sales Manager
             [
@@ -72,8 +81,8 @@ class WorkflowSeeder extends Seeder
                 'email' => 'sales.manager@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 3,
-                'role' => 'SalesManager',
-                'permissions' => json_encode(['approve_purchases', 'manage_sales'])
+                'role_id' => $managerRole->id,
+                'permissions' => ['approve_requests', 'manage_team']
             ],
             // Procurement
             [
@@ -81,8 +90,8 @@ class WorkflowSeeder extends Seeder
                 'email' => 'procurement@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 4,
-                'role' => 'Procurement',
-                'permissions' => json_encode(['manage_procurement', 'update_status'])
+                'role_id' => $employeeRole->id,
+                'permissions' => ['submit_requests', 'view_own_requests']
             ],
             // Employees
             [
@@ -90,21 +99,24 @@ class WorkflowSeeder extends Seeder
                 'email' => 'john.doe@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 1,
-                'role' => 'Employee',
-                'permissions' => json_encode(['submit_requests'])
+                'role_id' => $employeeRole->id,
+                'permissions' => ['submit_requests', 'view_own_requests']
             ],
             [
                 'full_name' => 'Jane Smith',
                 'email' => 'jane.smith@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 2,
-                'role' => 'Employee',
-                'permissions' => json_encode(['submit_requests'])
+                'role_id' => $employeeRole->id,
+                'permissions' => ['submit_requests', 'view_own_requests']
             ],
         ];
 
         foreach ($users as $user) {
-            User::create($user);
+            User::firstOrCreate(
+                ['email' => $user['email']],
+                $user
+            );
         }
 
         // Create approval rules

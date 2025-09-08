@@ -16,7 +16,7 @@ class UserController extends Controller
     public function __construct()
     {
         $this->middleware(function ($request, $next) {
-            if (Auth::user()->role !== 'Admin') {
+            if (Auth::user()->role->name !== 'admin') {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. Admin access required.'
@@ -31,11 +31,11 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = User::with('department');
+        $query = User::with(['department', 'role']);
 
         // Filter by role
-        if ($request->has('role')) {
-            $query->where('role', $request->role);
+        if ($request->has('role_id')) {
+            $query->where('role_id', $request->role_id);
         }
 
         // Filter by department
@@ -70,7 +70,7 @@ class UserController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8',
             'department_id' => 'required|exists:departments,id',
-            'role' => 'required|in:Employee,Manager,SalesManager,CEO,Procurement,Admin',
+            'role_id' => 'required|exists:roles,id',
             'permissions' => 'nullable|array'
         ]);
 
@@ -87,7 +87,7 @@ class UserController extends Controller
             $userData['password'] = Hash::make($request->password);
 
             if ($request->has('permissions')) {
-                $userData['permissions'] = json_encode($request->permissions);
+                $userData['permissions'] = $request->permissions;
             }
 
             $user = User::create($userData);
@@ -95,7 +95,7 @@ class UserController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'User created successfully',
-                'data' => $user->load('department')
+                'data' => $user->load(['department', 'role'])
             ], 201);
 
         } catch (\Exception $e) {
@@ -112,7 +112,7 @@ class UserController extends Controller
      */
     public function show(string $id): JsonResponse
     {
-        $user = User::with(['department', 'requests', 'auditLogs'])
+        $user = User::with(['department', 'role', 'requests', 'auditLogs'])
             ->findOrFail($id);
 
         return response()->json([
@@ -133,7 +133,7 @@ class UserController extends Controller
             'email' => 'required|email|unique:users,email,' . $id,
             'password' => 'nullable|string|min:8',
             'department_id' => 'required|exists:departments,id',
-            'role' => 'required|in:Employee,Manager,SalesManager,CEO,Procurement,Admin',
+            'role_id' => 'required|exists:roles,id',
             'permissions' => 'nullable|array'
         ]);
 
@@ -153,7 +153,7 @@ class UserController extends Controller
             }
 
             if ($request->has('permissions')) {
-                $userData['permissions'] = json_encode($request->permissions);
+                $userData['permissions'] = $request->permissions;
             }
 
             $user->update($userData);
@@ -161,7 +161,7 @@ class UserController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'User updated successfully',
-                'data' => $user->load('department')
+                'data' => $user->load(['department', 'role'])
             ]);
 
         } catch (\Exception $e) {
@@ -218,14 +218,12 @@ class UserController extends Controller
      */
     public function getRoles(): JsonResponse
     {
-        $roles = [
-            'Employee' => 'Employee',
-            'Manager' => 'Manager',
-            'SalesManager' => 'Sales Manager',
-            'CEO' => 'CEO',
-            'Procurement' => 'Procurement',
-            'Admin' => 'Admin'
-        ];
+        $roles = Role::where('is_active', true)
+            ->select('id', 'name')
+            ->get()
+            ->mapWithKeys(function($role) {
+                return [$role->id => $role->name];
+            });
 
         return response()->json([
             'success' => true,

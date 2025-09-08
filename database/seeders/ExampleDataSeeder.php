@@ -5,6 +5,7 @@ namespace Database\Seeders;
 use Illuminate\Database\Seeder;
 use App\Models\User;
 use App\Models\Department;
+use App\Models\Role;
 use App\Models\Request;
 use App\Models\ApprovalRule;
 use App\Models\AuditLog;
@@ -20,20 +21,28 @@ class ExampleDataSeeder extends Seeder
      */
     public function run(): void
     {
+        // Get roles
+        $adminRole = Role::where('name', 'admin')->first();
+        $managerRole = Role::where('name', 'manager')->first();
+        $employeeRole = Role::where('name', 'employee')->first();
+
         // Create Departments
         $departments = [
-            ['name' => 'Information Technology', 'description' => 'IT Department'],
-            ['name' => 'Human Resources', 'description' => 'HR Department'],
-            ['name' => 'Finance', 'description' => 'Finance Department'],
-            ['name' => 'Operations', 'description' => 'Operations Department'],
-            ['name' => 'Sales', 'description' => 'Sales Department'],
-            ['name' => 'Marketing', 'description' => 'Marketing Department'],
-            ['name' => 'Procurement', 'description' => 'Procurement Department'],
-            ['name' => 'Executive', 'description' => 'Executive Department'],
+            ['name' => 'Information Technology', 'description' => 'IT Department', 'role_id' => $adminRole->id],
+            ['name' => 'Human Resources', 'description' => 'HR Department', 'role_id' => $managerRole->id],
+            ['name' => 'Finance', 'description' => 'Finance Department', 'role_id' => $managerRole->id],
+            ['name' => 'Operations', 'description' => 'Operations Department', 'role_id' => $employeeRole->id],
+            ['name' => 'Sales', 'description' => 'Sales Department', 'role_id' => $employeeRole->id],
+            ['name' => 'Marketing', 'description' => 'Marketing Department', 'role_id' => $employeeRole->id],
+            ['name' => 'Procurement', 'description' => 'Procurement Department', 'role_id' => $employeeRole->id],
+            ['name' => 'Executive', 'description' => 'Executive Department', 'role_id' => $adminRole->id],
         ];
 
         foreach ($departments as $dept) {
-            Department::create($dept);
+            Department::firstOrCreate(
+                ['name' => $dept['name']],
+                $dept
+            );
         }
 
         // Create Users
@@ -44,7 +53,7 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'john.doe@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 1,
-                'role' => 'Employee',
+                'role_id' => $employeeRole->id,
                 'permissions' => ['submit_requests', 'view_own_requests']
             ],
             [
@@ -52,7 +61,7 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'sarah.wilson@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 1,
-                'role' => 'Manager',
+                'role_id' => $managerRole->id,
                 'permissions' => ['approve_requests', 'view_department_requests', 'manage_team']
             ],
 
@@ -62,7 +71,7 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'jane.smith@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 2,
-                'role' => 'Employee',
+                'role_id' => $employeeRole->id,
                 'permissions' => ['submit_requests', 'view_own_requests']
             ],
             [
@@ -70,7 +79,7 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'michael.brown@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 2,
-                'role' => 'Manager',
+                'role_id' => $managerRole->id,
                 'permissions' => ['approve_requests', 'view_department_requests', 'manage_team']
             ],
 
@@ -80,7 +89,7 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'emily.davis@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 3,
-                'role' => 'Employee',
+                'role_id' => $employeeRole->id,
                 'permissions' => ['submit_requests', 'view_own_requests']
             ],
             [
@@ -88,7 +97,7 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'robert.johnson@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 3,
-                'role' => 'Manager',
+                'role_id' => $managerRole->id,
                 'permissions' => ['approve_requests', 'view_department_requests', 'manage_team']
             ],
 
@@ -98,8 +107,8 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'mike.johnson@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 5,
-                'role' => 'SalesManager',
-                'permissions' => ['approve_purchase_requests', 'view_all_requests', 'manage_sales']
+                'role_id' => $employeeRole->id,
+                'permissions' => ['submit_requests', 'view_own_requests']
             ],
 
             // Procurement Department
@@ -108,8 +117,8 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'lisa.chen@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 7,
-                'role' => 'Procurement',
-                'permissions' => ['process_orders', 'update_delivery_status', 'manage_procurement']
+                'role_id' => $employeeRole->id,
+                'permissions' => ['submit_requests', 'view_own_requests']
             ],
 
             // Executive Department
@@ -118,23 +127,16 @@ class ExampleDataSeeder extends Seeder
                 'email' => 'david.brown@company.com',
                 'password' => Hash::make('password'),
                 'department_id' => 8,
-                'role' => 'CEO',
-                'permissions' => ['approve_high_value_requests', 'view_all_requests', 'system_admin']
-            ],
-
-            // Admin
-            [
-                'full_name' => 'Admin User',
-                'email' => 'admin@company.com',
-                'password' => Hash::make('password'),
-                'department_id' => 1,
-                'role' => 'Admin',
-                'permissions' => ['full_access']
+                'role_id' => $adminRole->id,
+                'permissions' => ['*']
             ]
         ];
 
         foreach ($users as $user) {
-            User::create($user);
+            User::firstOrCreate(
+                ['email' => $user['email']],
+                $user
+            );
         }
 
         // Create Approval Rules
@@ -270,8 +272,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 1,
                 'action' => 'Submitted',
                 'notes' => 'Request submitted for approval',
-                'ip_address' => '192.168.1.100',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(5)
             ],
             [
@@ -279,8 +279,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 1,
                 'action' => 'Approved',
                 'notes' => 'Approved by IT Manager - necessary for development work',
-                'ip_address' => '192.168.1.101',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(4)
             ],
             [
@@ -288,8 +286,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 1,
                 'action' => 'Approved',
                 'notes' => 'Approved by Sales Manager - purchase-related item',
-                'ip_address' => '192.168.1.102',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(3)
             ],
             [
@@ -297,8 +293,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 1,
                 'action' => 'Approved',
                 'notes' => 'Approved by CEO - high-value request',
-                'ip_address' => '192.168.1.103',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(2)
             ],
             [
@@ -306,8 +300,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 2,
                 'action' => 'Submitted',
                 'notes' => 'Request submitted for approval',
-                'ip_address' => '192.168.1.100',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(1)
             ],
             [
@@ -315,8 +307,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 3,
                 'action' => 'Submitted',
                 'notes' => 'Request submitted for approval',
-                'ip_address' => '192.168.1.100',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(3)
             ],
             [
@@ -324,8 +314,6 @@ class ExampleDataSeeder extends Seeder
                 'request_id' => 3,
                 'action' => 'Rejected',
                 'notes' => 'Rejected by HR Manager - budget constraints',
-                'ip_address' => '192.168.1.104',
-                'user_agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'created_at' => now()->subDays(2)
             ]
         ];

@@ -59,7 +59,52 @@ Route::middleware('auth')->group(function () {
     Route::get('/settings', function () {
         return inertia('Settings');
     });
+
 });
+
+// Test route for debugging (Public - no auth required)
+Route::get('/test-data', function () {
+    return response()->json([
+        'users' => App\Models\User::with('role')->get(),
+        'roles' => App\Models\Role::all()
+    ]);
+});
+
+// Test authenticated route
+Route::get('/test-auth', function () {
+    if (Auth::check()) {
+        return response()->json([
+            'authenticated' => true,
+            'user' => Auth::user()->load('role'),
+            'users' => App\Models\User::with('role')->get(),
+            'roles' => App\Models\Role::all()
+        ]);
+    } else {
+        return response()->json([
+            'authenticated' => false,
+            'message' => 'Please login first'
+        ]);
+    }
+})->middleware('auth');
+
+// Test API route with session
+Route::get('/api/test-session', function () {
+    if (Auth::check()) {
+        return response()->json([
+            'success' => true,
+            'authenticated' => true,
+            'user' => Auth::user()->load('role'),
+            'session_id' => request()->session()->getId()
+        ]);
+    } else {
+        return response()->json([
+            'success' => false,
+            'authenticated' => false,
+            'message' => 'Please login first',
+            'session_id' => request()->session()->getId()
+        ]);
+    }
+})->middleware('web');
 
 // Approval Portal Routes (Public - no auth required)
 Route::get('/approval/{token}', [ApprovalPortalController::class, 'show'])->name('approval.portal');
