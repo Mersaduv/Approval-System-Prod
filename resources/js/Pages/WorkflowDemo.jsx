@@ -2,7 +2,7 @@ import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 
-export default function WorkflowDemo() {
+export default function WorkflowDemo({ auth }) {
     const [currentStep, setCurrentStep] = useState(0)
     const [isRunning, setIsRunning] = useState(false)
     const [workflowData, setWorkflowData] = useState({
@@ -44,34 +44,20 @@ export default function WorkflowDemo() {
         },
         {
             id: 3,
-            title: 'Sales Manager Approval',
-            description: 'Since this is a purchase-related request, Sales Manager approval is required',
-            action: 'Sales Manager Reviews',
+            title: 'Admin Approval Required',
+            description: 'Amount exceeds 5,000 AFN threshold, Admin approval is required',
+            action: 'Admin Reviews',
             status: 'pending',
-            user: 'Mike Johnson (Sales Manager)',
-            department: 'Sales',
+            user: 'David Brown (Admin)',
+            department: 'Administration',
             details: {
                 approvalRequired: true,
-                role: 'SalesManager',
-                reason: 'Purchase-related item'
-            }
-        },
-        {
-            id: 4,
-            title: 'CEO Approval Required',
-            description: 'Amount exceeds 5,000 AFN threshold, CEO approval is required',
-            action: 'CEO Reviews',
-            status: 'pending',
-            user: 'David Brown (CEO)',
-            department: 'Executive',
-            details: {
-                approvalRequired: true,
-                role: 'CEO',
+                role: 'Admin',
                 reason: 'Amount exceeds 5,000 AFN threshold'
             }
         },
         {
-            id: 5,
+            id: 4,
             title: 'Forward to Procurement',
             description: 'All approvals complete, request forwarded to procurement team',
             action: 'Procurement Processing',
@@ -84,7 +70,7 @@ export default function WorkflowDemo() {
             }
         },
         {
-            id: 6,
+            id: 5,
             title: 'Item Delivered',
             description: 'Laptop has been delivered and is ready for use',
             action: 'Delivery Confirmed',
@@ -181,7 +167,7 @@ export default function WorkflowDemo() {
     }
 
     return (
-        <AppLayout title="Workflow Demo">
+        <AppLayout title="Workflow Demo" auth={auth}>
             <div className="max-w-6xl mx-auto">
                 {/* Header */}
                 <div className="mb-8">

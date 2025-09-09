@@ -15,13 +15,13 @@ class RoleSeeder extends Seeder
     {
         $roles = [
             [
-                'name' => 'admin',
+                'name' => Role::ADMIN,
                 'description' => 'Full system access with all permissions',
                 'permissions' => ['*'], // All permissions
                 'is_active' => true
             ],
             [
-                'name' => 'manager',
+                'name' => Role::MANAGER,
                 'description' => 'Department manager with approval and team management permissions',
                 'permissions' => [
                     'submit_requests',
@@ -34,7 +34,7 @@ class RoleSeeder extends Seeder
                 'is_active' => true
             ],
             [
-                'name' => 'employee',
+                'name' => Role::EMPLOYEE,
                 'description' => 'Basic employee with request submission permissions',
                 'permissions' => [
                     'submit_requests',

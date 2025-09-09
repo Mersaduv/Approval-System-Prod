@@ -28,20 +28,16 @@ class RequestController extends Controller
         $query = RequestModel::with(['employee', 'employee.department', 'procurement', 'notifications']);
 
         // Filter based on user role
-        switch ($user->role) {
-            case 'Employee':
+        switch ($user->role->name) {
+            case 'employee':
                 $query->where('employee_id', $user->id);
                 break;
-            case 'Manager':
+            case 'manager':
                 $query->whereHas('employee', function($q) use ($user) {
                     $q->where('department_id', $user->department_id);
                 });
                 break;
-            case 'Procurement':
-                $query->where('status', 'Approved');
-                break;
-            case 'Admin':
-            case 'CEO':
+            case 'admin':
                 // Can see all requests
                 break;
         }
@@ -207,7 +203,7 @@ class RequestController extends Controller
     }
 
     /**
-     * Update procurement status
+     * Update procurement status (legacy method for admin)
      */
     public function updateProcurement(Request $request, string $id): JsonResponse
     {
@@ -224,11 +220,11 @@ class RequestController extends Controller
             ], 422);
         }
 
-        // Check if user is procurement
-        if (Auth::user()->role !== 'Procurement') {
+        // Check if user is admin (only admin can update procurement status in our simplified system)
+        if (Auth::user()->role->name !== 'admin') {
             return response()->json([
                 'success' => false,
-                'message' => 'Only procurement team can update procurement status'
+                'message' => 'Only admin can update procurement status'
             ], 403);
         }
 
@@ -254,6 +250,90 @@ class RequestController extends Controller
     }
 
     /**
+     * Process procurement approval (for procurement users)
+     */
+    public function processProcurement(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'status' => 'required|in:Pending Procurement,Ordered,Delivered,Cancelled',
+            'final_cost' => 'nullable|numeric|min:0',
+            'notes' => 'nullable|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Check if user can process procurement
+        if (!Auth::user()->canProcessProcurement()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only procurement team members can process procurement requests'
+            ], 403);
+        }
+
+        try {
+            $this->workflowService->processProcurementApproval(
+                $id,
+                Auth::id(),
+                $request->input('status'),
+                $request->input('final_cost'),
+                $request->input('notes')
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Procurement request processed successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to process procurement request',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get procurement requests (all approved requests for procurement team)
+     */
+    public function pendingProcurement(): JsonResponse
+    {
+        try {
+            // Check if user can process procurement
+            if (!Auth::user()->canProcessProcurement()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only procurement team members can view procurement requests'
+                ], 403);
+            }
+
+            // Get all approved requests that are in procurement workflow
+            $requests = RequestModel::whereIn('status', ['Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'])
+                ->with(['employee.department', 'procurement'])
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $requests
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch procurement requests',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get requests pending approval for current user
      */
     public function pendingApprovals(): JsonResponse
@@ -264,26 +344,13 @@ class RequestController extends Controller
             ->where('status', 'Pending');
 
         // Filter based on user role and department
-        switch ($user->role) {
-            case 'Manager':
+        switch ($user->role->name) {
+            case 'manager':
                 $query->whereHas('employee', function($q) use ($user) {
                     $q->where('department_id', $user->department_id);
                 });
                 break;
-            case 'SalesManager':
-                $query->where(function($q) {
-                    $q->where('item', 'like', '%purchase%')
-                      ->orWhere('item', 'like', '%buy%')
-                      ->orWhere('item', 'like', '%order%')
-                      ->orWhere('description', 'like', '%purchase%')
-                      ->orWhere('description', 'like', '%buy%')
-                      ->orWhere('description', 'like', '%order%');
-                });
-                break;
-            case 'CEO':
-                $query->where('amount', '>=', 5000);
-                break;
-            case 'Admin':
+            case 'admin':
                 // Can see all pending requests
                 break;
             default:
@@ -302,19 +369,42 @@ class RequestController extends Controller
     }
 
     /**
+     * Get audit logs for a request
+     */
+    public function auditLogs(string $id): JsonResponse
+    {
+        $request = RequestModel::findOrFail($id);
+
+        // Check if user can view this request
+        if (!$this->canViewRequest($request, Auth::user())) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized to view this request'
+            ], 403);
+        }
+
+        $auditLogs = $request->auditLogs()
+            ->with('user')
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $auditLogs
+        ]);
+    }
+
+    /**
      * Check if user can view a request
      */
     private function canViewRequest(RequestModel $request, $user): bool
     {
-        switch ($user->role) {
-            case 'Employee':
+        switch ($user->role->name) {
+            case 'employee':
                 return $request->employee_id === $user->id;
-            case 'Manager':
+            case 'manager':
                 return $request->employee->department_id === $user->department_id;
-            case 'Procurement':
-                return in_array($request->status, ['Approved', 'Delivered']);
-            case 'Admin':
-            case 'CEO':
+            case 'admin':
                 return true;
             default:
                 return false;

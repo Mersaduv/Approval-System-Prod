@@ -4,11 +4,13 @@ namespace App\Services;
 
 use App\Models\Request as RequestModel;
 use App\Models\User;
+use App\Models\Role;
 use App\Models\ApprovalRule;
 use App\Models\Notification;
 use App\Models\AuditLog;
 use App\Models\Procurement;
 use App\Models\ApprovalToken;
+use App\Models\SystemSetting;
 use App\Mail\ApprovalNotificationMail;
 use App\Mail\EmployeeNotificationMail;
 use App\Services\NotificationService;
@@ -18,8 +20,6 @@ use Illuminate\Support\Facades\Mail;
 
 class WorkflowService
 {
-    const CEO_THRESHOLD = 5000; // AFN
-
     protected $notificationService;
 
     public function __construct(NotificationService $notificationService)
@@ -85,25 +85,51 @@ class WorkflowService
         $employee = $request->employee;
         $amount = $request->amount;
 
+        // Get thresholds from settings
+        $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
+        $managerOnlyThreshold = SystemSetting::get('manager_only_threshold', 2000);
+        $ceoThreshold = SystemSetting::get('ceo_approval_threshold', 5000);
+
+        // Auto-approval: amount <= auto_approval_threshold
+        if ($amount <= $autoApprovalThreshold) {
+            // Auto-approve the request
+            $this->autoApproveRequest($request);
+            return;
+        }
+
+        // Manager-only approval: auto_approval_threshold < amount <= manager_only_threshold
+        if ($amount <= $managerOnlyThreshold) {
+            $manager = $this->getDepartmentManager($employee->department_id);
+            if ($manager) {
+                $this->sendApprovalRequest($request, $manager, 'Manager approval required');
+            } else {
+                // If no manager in department, send to admin
+                $admin = $this->getAdmin();
+                if ($admin) {
+                    $this->sendApprovalRequest($request, $admin, 'Admin approval required (no manager in department)');
+                }
+            }
+            return;
+        }
+
+        // Manager + CEO approval: amount > manager_only_threshold
         // Step 1: Manager approval
         $manager = $this->getDepartmentManager($employee->department_id);
         if ($manager) {
             $this->sendApprovalRequest($request, $manager, 'Manager approval required');
-        }
-
-        // Step 2: Sales Manager approval (if purchase-related)
-        if ($this->isPurchaseRelated($request)) {
-            $salesManager = $this->getSalesManager();
-            if ($salesManager) {
-                $this->sendApprovalRequest($request, $salesManager, 'Sales Manager approval required for purchase');
+        } else {
+            // If no manager in department, send to admin
+            $admin = $this->getAdmin();
+            if ($admin) {
+                $this->sendApprovalRequest($request, $admin, 'Admin approval required (no manager in department)');
             }
         }
 
-        // Step 3: CEO approval (if amount exceeds threshold)
-        if ($amount >= self::CEO_THRESHOLD) {
-            $ceo = $this->getCEO();
-            if ($ceo) {
-                $this->sendApprovalRequest($request, $ceo, 'CEO approval required for high-value request');
+        // Step 2: CEO approval (if amount exceeds CEO threshold)
+        if ($amount >= $ceoThreshold) {
+            $admin = $this->getAdmin();
+            if ($admin) {
+                $this->sendApprovalRequest($request, $admin, 'CEO approval required for high-value request');
             }
         }
     }
@@ -138,16 +164,26 @@ class WorkflowService
             // Log the approval
             $this->logAction($approverId, $requestId, 'Approved', $notes);
 
-            // Check if all required approvals are complete
-            if ($this->allApprovalsComplete($request)) {
+            // For our simplified system, if manager approves, it's automatically approved
+            // If admin approves, it's automatically approved
+            if ($approver->isManager() || $approver->isAdmin()) {
                 // Forward to Procurement
-                $this->forwardToProcurement($request);
+                $this->forwardToProcurement($request, $approverId);
 
                 // Notify employee that request is approved
                 $this->notificationService->sendEmployeeNotification($request, 'approved');
             } else {
-                // Continue with next approver
-                $this->processNextApproval($request);
+                // Check if all required approvals are complete
+                if ($this->allApprovalsComplete($request)) {
+                    // Forward to Procurement
+                    $this->forwardToProcurement($request, $approverId);
+
+                    // Notify employee that request is approved
+                    $this->notificationService->sendEmployeeNotification($request, 'approved');
+                } else {
+                    // Continue with next approver
+                    $this->processNextApproval($request);
+                }
             }
 
             return true;
@@ -179,26 +215,83 @@ class WorkflowService
     /**
      * Forward request to Procurement
      */
-    private function forwardToProcurement(RequestModel $request): void
+    private function forwardToProcurement(RequestModel $request, int $approverId = null): void
     {
         // Create procurement record
         Procurement::create([
             'request_id' => $request->id,
-            'status' => 'Ordered'
+            'status' => 'Pending Procurement'
         ]);
 
-        // Update request status
-        $request->update(['status' => 'Approved']);
+        // Update request status to show it's waiting for procurement
+        $request->update(['status' => 'Pending Procurement']);
 
         // Notify procurement team
         $this->notificationService->sendProcurementNotification($request);
 
         // Log the action
-        $this->logAction(1, $request->id, 'Forwarded to Procurement', 'Request approved and forwarded to procurement team');
+        $this->logAction($approverId ?? 1, $request->id, 'Forwarded to Procurement', 'Request approved and forwarded to procurement team');
     }
 
     /**
-     * Update procurement status
+     * Process procurement approval
+     */
+    public function processProcurementApproval(int $requestId, int $procurementUserId, string $status, float $finalCost = null, string $notes = null): bool
+    {
+        return DB::transaction(function () use ($requestId, $procurementUserId, $status, $finalCost, $notes) {
+            $request = RequestModel::findOrFail($requestId);
+            $procurementUser = User::findOrFail($procurementUserId);
+
+            // Check if user has procurement role
+            if (!$procurementUser->isProcurement()) {
+                throw new \Exception('Only procurement team members can process procurement approvals');
+            }
+
+            // Check if request is in correct status (either Approved or Pending Procurement)
+            if (!in_array($request->status, ['Approved', 'Pending Procurement'])) {
+                throw new \Exception('Request is not in a valid status for procurement processing');
+            }
+
+            $procurement = $request->procurement;
+            if (!$procurement) {
+                // Create procurement record if it doesn't exist (for Approved requests)
+                $procurement = Procurement::create([
+                    'request_id' => $request->id,
+                    'status' => 'Pending Procurement'
+                ]);
+            }
+
+            // Update procurement status
+            $procurement->update([
+                'status' => $status,
+                'final_cost' => $finalCost,
+                'procurement_user_id' => $procurementUserId
+            ]);
+
+            // Update request status based on procurement decision
+            if ($status === 'Pending Procurement') {
+                $request->update(['status' => 'Pending Procurement']);
+                $this->notificationService->sendEmployeeNotification($request, 'procurement_started');
+            } elseif ($status === 'Ordered') {
+                $request->update(['status' => 'Ordered']);
+                $this->notificationService->sendEmployeeNotification($request, 'ordered');
+            } elseif ($status === 'Delivered') {
+                $request->update(['status' => 'Delivered']);
+                $this->notificationService->sendEmployeeNotification($request, 'delivered');
+            } elseif ($status === 'Cancelled') {
+                $request->update(['status' => 'Cancelled']);
+                $this->notificationService->sendEmployeeNotification($request, 'cancelled', $notes);
+            }
+
+            // Log the action
+            $this->logAction($procurementUserId, $requestId, 'Procurement Processed', "Status: {$status}" . ($notes ? " - {$notes}" : ""));
+
+            return true;
+        });
+    }
+
+    /**
+     * Update procurement status (legacy method for backward compatibility)
      */
     public function updateProcurementStatus(int $requestId, string $status, float $finalCost = null): bool
     {
@@ -239,22 +332,28 @@ class WorkflowService
         $employee = $request->employee;
         $amount = $request->amount;
 
-        // Check manager approval
-        if (!$this->hasManagerApproval($request)) {
-            return false;
+        // Get thresholds from settings
+        $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
+        $managerOnlyThreshold = SystemSetting::get('manager_only_threshold', 2000);
+        $ceoThreshold = SystemSetting::get('ceo_approval_threshold', 5000);
+
+        // Auto-approval: no additional approvals needed
+        if ($amount <= $autoApprovalThreshold) {
+            return true;
         }
 
-        // Check sales manager approval (if required)
-        if ($this->isPurchaseRelated($request) && !$this->hasSalesManagerApproval($request)) {
-            return false;
+        // Manager-only approval: only manager approval needed
+        if ($amount <= $managerOnlyThreshold) {
+            return $this->hasManagerApproval($request);
         }
 
-        // Check CEO approval (if required)
-        if ($amount >= self::CEO_THRESHOLD && !$this->hasCEOApproval($request)) {
-            return false;
+        // Manager + CEO approval: both approvals needed
+        if ($amount >= $ceoThreshold) {
+            return $this->hasManagerApproval($request) && $this->hasAdminApproval($request);
         }
 
-        return true;
+        // Fallback: manager approval required
+        return $this->hasManagerApproval($request);
     }
 
     /**
@@ -265,21 +364,35 @@ class WorkflowService
         $employee = $request->employee;
         $amount = $request->amount;
 
-        // Check if sales manager approval is needed
-        if ($this->isPurchaseRelated($request) && !$this->hasSalesManagerApproval($request)) {
-            $salesManager = $this->getSalesManager();
-            if ($salesManager) {
-                $this->sendApprovalRequest($request, $salesManager, 'Sales Manager approval required for purchase');
-            }
-        }
+        // Get thresholds from settings
+        $managerOnlyThreshold = SystemSetting::get('manager_only_threshold', 2000);
+        $ceoThreshold = SystemSetting::get('ceo_approval_threshold', 5000);
 
-        // Check if CEO approval is needed
-        if ($amount >= self::CEO_THRESHOLD && !$this->hasCEOApproval($request)) {
-            $ceo = $this->getCEO();
-            if ($ceo) {
-                $this->sendApprovalRequest($request, $ceo, 'CEO approval required for high-value request');
+        // If amount requires CEO approval and we don't have it yet
+        if ($amount >= $ceoThreshold && !$this->hasAdminApproval($request)) {
+            $admin = $this->getAdmin();
+            if ($admin) {
+                $this->sendApprovalRequest($request, $admin, 'CEO approval required for high-value request');
             }
         }
+    }
+
+    /**
+     * Auto-approve a request
+     */
+    private function autoApproveRequest(RequestModel $request): void
+    {
+        // Update request status to approved
+        $request->update(['status' => 'Approved']);
+
+        // Log the auto-approval
+        $this->logAction(1, $request->id, 'Auto-Approved', 'Request auto-approved based on amount threshold');
+
+        // Forward to Procurement
+        $this->forwardToProcurement($request, 1);
+
+        // Notify employee that request is approved
+        $this->notificationService->sendEmployeeNotification($request, 'approved');
     }
 
     /**
@@ -310,30 +423,44 @@ class WorkflowService
     private function getDepartmentManager(int $departmentId): ?User
     {
         return User::where('department_id', $departmentId)
-            ->where('role', 'Manager')
+            ->whereHas('role', function($query) {
+                $query->where('name', Role::MANAGER);
+            })
             ->first();
     }
 
-    private function getSalesManager(): ?User
+    private function getAdmin(): ?User
     {
-        return User::where('role', 'SalesManager')->first();
-    }
-
-    private function getCEO(): ?User
-    {
-        return User::where('role', 'CEO')->first();
+        return User::whereHas('role', function($query) {
+            $query->where('name', Role::ADMIN);
+        })->first();
     }
 
     private function getApproverByRole(string $role, int $departmentId): ?User
     {
-        if ($role === 'Manager') {
-            return User::where('role', 'Manager')
-                ->where('department_id', $departmentId)
-                ->first();
-        } elseif (in_array($role, ['SalesManager', 'CEO', 'Procurement', 'Admin'])) {
-            return User::where('role', $role)->first();
+        if ($role === Role::MANAGER) {
+            return User::whereHas('role', function($query) {
+                $query->where('name', Role::MANAGER);
+            })
+            ->where('department_id', $departmentId)
+            ->first();
+        } elseif ($role === Role::ADMIN) {
+            return User::whereHas('role', function($query) {
+                $query->where('name', Role::ADMIN);
+            })->first();
+        } elseif ($role === Role::PROCUREMENT) {
+            return User::whereHas('role', function($query) {
+                $query->where('name', Role::PROCUREMENT);
+            })->first();
         }
         return null;
+    }
+
+    private function getProcurementUsers(): \Illuminate\Database\Eloquent\Collection
+    {
+        return User::whereHas('role', function($query) {
+            $query->where('name', Role::PROCUREMENT);
+        })->get();
     }
 
     private function canApprove(RequestModel $request, User $approver): bool
@@ -341,18 +468,13 @@ class WorkflowService
         // Implement authorization logic based on role and department
         $employee = $request->employee;
 
-        switch ($approver->role) {
-            case 'Manager':
-                return $approver->department_id === $employee->department_id;
-            case 'SalesManager':
-                return $this->isPurchaseRelated($request);
-            case 'CEO':
-                return $request->amount >= self::CEO_THRESHOLD;
-            case 'Admin':
-                return true;
-            default:
-                return false;
+        if ($approver->isAdmin()) {
+            return true;
+        } elseif ($approver->isManager()) {
+            return $approver->department_id === $employee->department_id;
         }
+
+        return false;
     }
 
     private function isPurchaseRelated(RequestModel $request): bool
@@ -376,28 +498,22 @@ class WorkflowService
         return AuditLog::where('request_id', $request->id)
             ->where('action', 'Approved')
             ->whereHas('user', function($query) use ($request) {
-                $query->where('role', 'Manager')
-                      ->where('department_id', $request->employee->department_id);
+                $query->whereHas('role', function($roleQuery) {
+                    $roleQuery->where('name', Role::MANAGER);
+                })
+                ->where('department_id', $request->employee->department_id);
             })
             ->exists();
     }
 
-    private function hasSalesManagerApproval(RequestModel $request): bool
+    private function hasAdminApproval(RequestModel $request): bool
     {
         return AuditLog::where('request_id', $request->id)
             ->where('action', 'Approved')
             ->whereHas('user', function($query) {
-                $query->where('role', 'SalesManager');
-            })
-            ->exists();
-    }
-
-    private function hasCEOApproval(RequestModel $request): bool
-    {
-        return AuditLog::where('request_id', $request->id)
-            ->where('action', 'Approved')
-            ->whereHas('user', function($query) {
-                $query->where('role', 'CEO');
+                $query->whereHas('role', function($roleQuery) {
+                    $roleQuery->where('name', Role::ADMIN);
+                });
             })
             ->exists();
     }

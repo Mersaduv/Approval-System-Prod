@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\ApprovalPortalController;
@@ -39,25 +40,68 @@ Route::middleware('auth')->group(function () {
 
     // New UI Routes
     Route::get('/requests', function () {
-        return inertia('Requests');
+        return inertia('Requests', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
     Route::get('/requests/new', function () {
-        return inertia('NewRequest');
+        return inertia('NewRequest', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+    Route::get('/requests/{id}', function ($id) {
+        return inertia('RequestView', [
+            'requestId' => $id,
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
     Route::get('/notifications', function () {
-        return inertia('Notifications');
+        return inertia('Notifications', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
     Route::get('/reports', function () {
-        return inertia('Reports');
+        return inertia('Reports', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
     Route::get('/workflow-demo', function () {
-        return inertia('WorkflowDemo');
+        return inertia('WorkflowDemo', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
     Route::get('/users', function () {
-        return inertia('Users');
+        return inertia('Users', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
     Route::get('/settings', function () {
-        return inertia('Settings');
+        return inertia('Settings', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+    Route::get('/procurement', function () {
+        return inertia('Procurement', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
     });
 
 });

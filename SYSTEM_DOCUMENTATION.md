@@ -317,3 +317,6 @@ For support and questions:
 ---
 
 **Built with ❤️ using Laravel and React**
+
+
+php artisan config:clear ; php artisan cache:clear ; php artisan route:clear

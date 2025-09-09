@@ -66,9 +66,12 @@ class NotificationService
      */
     public function sendProcurementNotification(RequestModel $request): void
     {
-        $procurementUsers = User::where('role', 'Procurement')->get();
+        // For now, we'll notify admin users since we don't have a specific procurement role
+        $adminUsers = User::whereHas('role', function($query) {
+            $query->where('name', 'admin');
+        })->get();
 
-        foreach ($procurementUsers as $user) {
+        foreach ($adminUsers as $user) {
             $this->sendInAppNotification(
                 $request,
                 $user->id,

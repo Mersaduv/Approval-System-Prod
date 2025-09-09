@@ -1,9 +1,20 @@
 import { Head, Link, useForm } from '@inertiajs/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 export default function AppLayout({ children, title, auth }) {
     const [showUserMenu, setShowUserMenu] = useState(false)
     const [sidebarOpen, setSidebarOpen] = useState(false)
+
+    // Close sidebar on mobile when clicking outside
+    useEffect(() => {
+        const handleResize = () => {
+            if (window.innerWidth >= 1024) {
+                setSidebarOpen(false)
+            }
+        }
+        window.addEventListener('resize', handleResize)
+        return () => window.removeEventListener('resize', handleResize)
+    }, [])
 
     const { post } = useForm()
 
@@ -11,38 +22,76 @@ export default function AppLayout({ children, title, auth }) {
         post(route('logout'))
     }
 
-    const navigation = [
-        { name: 'Dashboard', href: '/dashboard', icon: '🏠', current: title === 'Dashboard' },
-        { name: 'Requests', href: '/requests', icon: '📄', current: title === 'Requests' },
-        { name: 'Users', href: '/users', icon: '👥', current: title === 'Users' },
-        { name: 'Settings', href: '/settings', icon: '⚙️', current: title === 'Settings' },
-    ]
+    const getNavigation = () => {
+        const baseNavigation = [
+            { name: 'Dashboard', href: '/dashboard', icon: '🏠', current: title === 'Dashboard' },
+            { name: 'Requests', href: '/requests', icon: '📄', current: title === 'Requests' },
+        ]
+
+        // Debug logging
+        console.log('Auth user:', auth.user)
+        console.log('User role:', auth.user?.role?.name)
+
+        // Add role-specific navigation
+        if (auth.user?.role?.name === 'admin') {
+            console.log('Adding admin navigation items')
+            baseNavigation.push(
+                { name: 'Users', href: '/users', icon: '👥', current: title === 'Users' },
+                { name: 'Settings', href: '/settings', icon: '⚙️', current: title === 'Settings' }
+            )
+        }
+
+        if (auth.user?.role?.name === 'procurement') {
+            console.log('Adding procurement navigation items')
+            baseNavigation.push(
+                { name: 'Procurement', href: '/procurement', icon: '📦', current: title === 'Procurement Management' }
+            )
+        }
+
+        console.log('Final navigation:', baseNavigation)
+        return baseNavigation
+    }
+
+    const navigation = getNavigation()
 
     return (
         <div className="min-h-screen bg-gray-50">
             <Head title={title} />
 
+            {/* Mobile sidebar overlay */}
+            {sidebarOpen && (
+                <div
+                    className="fixed inset-0 z-40 bg-black bg-opacity-50 lg:hidden"
+                    onClick={() => setSidebarOpen(false)}
+                />
+            )}
+
             {/* Sidebar */}
-            <div className="fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg">
+            <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out ${
+                sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+            } lg:translate-x-0`}>
                 <div className="flex flex-col h-full">
                     {/* Logo */}
-                    <div className="flex items-center h-16 px-6 border-b border-gray-200">
-                        <div className="flex items-center space-x-2">
-                            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-                                <span className="text-white font-bold text-sm">A</span>
-                            </div>
-                            <span className="text-xl font-bold text-gray-800">
-                                Approval System
+                    <div className="flex items-center justify-center h-auto px-4 lg:px-6 border-b border-gray-200">
+                        <div className="flex flex-col items-center py-4">
+                            <img
+                                src="/images/logo.png"
+                                alt="Approval System Logo"
+                                className="w-fit h-10 object-contain"
+                            />
+                            <span className="text-lg lg:text-xl font-bold text-gray-800">
+                                Approval Workflow
                             </span>
                         </div>
                     </div>
 
                     {/* Navigation */}
-                    <nav className="flex-1 px-4 py-6 space-y-2">
+                    <nav className="flex-1 px-2 lg:px-4 py-6 space-y-2">
                         {navigation.map((item) => (
                             <Link
                                 key={item.name}
                                 href={item.href}
+                                onClick={() => setSidebarOpen(false)}
                                 className={`flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                                     item.current
                                         ? 'bg-gray-100 text-gray-900'
@@ -56,7 +105,7 @@ export default function AppLayout({ children, title, auth }) {
                     </nav>
 
                     {/* Logout */}
-                    <div className="px-4 py-6 border-t border-gray-200">
+                    <div className="px-2 lg:px-4 py-6 border-t border-gray-200">
                         <button
                             onClick={handleLogout}
                             className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:text-gray-900 hover:bg-gray-50 w-full"
@@ -69,11 +118,21 @@ export default function AppLayout({ children, title, auth }) {
             </div>
 
             {/* Main content */}
-            <div className="ml-64">
+            <div className="lg:ml-64">
                 {/* Header */}
                 <header className="bg-blue-800 text-white shadow-sm">
-                    <div className="flex items-center justify-between h-16 px-6">
-                        <h1 className="text-xl font-semibold">{title}</h1>
+                    <div className="flex items-center justify-between h-16 px-4 lg:px-6">
+                        {/* Mobile menu button */}
+                        <button
+                            onClick={() => setSidebarOpen(!sidebarOpen)}
+                            className="lg:hidden flex items-center justify-center w-10 h-10 rounded-md text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                            </svg>
+                        </button>
+
+                        <h1 className="text-lg lg:text-xl font-semibold truncate">{title}</h1>
 
                         {/* User dropdown */}
                         <div className="relative">
@@ -81,9 +140,9 @@ export default function AppLayout({ children, title, auth }) {
                                 onClick={() => setShowUserMenu(!showUserMenu)}
                                 className="flex items-center space-x-2 text-white hover:text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-md p-2"
                             >
-                            <span className="text-sm font-medium">
-                                {auth?.user?.full_name || 'User'}
-                            </span>
+                                <span className="text-sm font-medium truncate max-w-32">
+                                    {auth?.user?.full_name || 'User'}
+                                </span>
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                                 </svg>
@@ -94,10 +153,10 @@ export default function AppLayout({ children, title, auth }) {
                                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50">
                                     <div className="py-1">
                                         <div className="px-4 py-2 border-b border-gray-200">
-                                            <p className="text-sm font-medium text-gray-900">
+                                            <p className="text-sm font-medium text-gray-900 truncate">
                                                 {auth?.user?.full_name || 'User'}
                                             </p>
-                                            <p className="text-sm text-gray-500">
+                                            <p className="text-sm text-gray-500 truncate">
                                                 {auth?.user?.email || ''}
                                             </p>
                                             <p className="text-xs text-gray-400">
@@ -132,7 +191,7 @@ export default function AppLayout({ children, title, auth }) {
                 </header>
 
                 {/* Page content */}
-                <main className="p-6">
+                <main className="p-4 lg:p-6">
                     {children}
                 </main>
             </div>

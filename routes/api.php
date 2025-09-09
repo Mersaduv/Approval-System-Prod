@@ -7,7 +7,7 @@ use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\Admin\ApprovalRuleController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\UserController;
-use App\Http\Controllers\Api\Admin\RoleController;
+use App\Http\Controllers\Api\Admin\SystemSettingsController;
 use App\Http\Controllers\ReportsController;
 
 /*
@@ -34,14 +34,17 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/requests', [RequestController::class, 'index']);
     Route::post('/requests', [RequestController::class, 'store']);
     Route::get('/requests/{id}', [RequestController::class, 'show']);
+    Route::get('/requests/{id}/audit-logs', [RequestController::class, 'auditLogs']);
 
     // Request actions
     Route::post('/requests/{id}/approve', [RequestController::class, 'approve']);
     Route::post('/requests/{id}/reject', [RequestController::class, 'reject']);
     Route::post('/requests/{id}/procurement', [RequestController::class, 'updateProcurement']);
+    Route::post('/requests/{id}/process-procurement', [RequestController::class, 'processProcurement']);
 
     // Pending approvals
     Route::get('/requests/pending/approvals', [RequestController::class, 'pendingApprovals']);
+    Route::get('/requests/pending/procurement', [RequestController::class, 'pendingProcurement']);
 
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);
@@ -72,14 +75,6 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     Route::put('/users/{id}/permissions', [UserController::class, 'updatePermissions']);
     Route::get('/users/stats/overview', [UserController::class, 'getStats']);
 
-    // Role management
-    Route::get('/roles', [RoleController::class, 'index']);
-    Route::post('/roles', [RoleController::class, 'store']);
-    Route::get('/roles/{id}', [RoleController::class, 'show']);
-    Route::put('/roles/{id}', [RoleController::class, 'update']);
-    Route::delete('/roles/{id}', [RoleController::class, 'destroy']);
-    Route::get('/roles/permissions/available', [RoleController::class, 'getPermissions']);
-    Route::put('/roles/{id}/permissions', [RoleController::class, 'updatePermissions']);
 
     // Approval rules management
     Route::get('/approval-rules', [ApprovalRuleController::class, 'index']);
@@ -90,6 +85,13 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     Route::get('/approval-rules/roles/available', [ApprovalRuleController::class, 'getApproverRoles']);
     Route::get('/approval-rules/department/{departmentId}', [ApprovalRuleController::class, 'getDepartmentRules']);
     Route::put('/approval-rules/department/{departmentId}/bulk', [ApprovalRuleController::class, 'bulkUpdate']);
+
+    // System settings management
+    Route::get('/settings', [SystemSettingsController::class, 'index']);
+    Route::get('/settings/{key}', [SystemSettingsController::class, 'show']);
+    Route::put('/settings', [SystemSettingsController::class, 'update']);
+    Route::put('/settings/{key}', [SystemSettingsController::class, 'updateSetting']);
+    Route::post('/settings/reset', [SystemSettingsController::class, 'reset']);
 });
 
 // Reporting routes

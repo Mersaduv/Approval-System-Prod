@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\Department;
+use App\Models\Role;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -214,16 +215,14 @@ class UserController extends Controller
     }
 
     /**
-     * Get available roles
+     * Get available roles (fixed roles only)
      */
     public function getRoles(): JsonResponse
     {
-        $roles = Role::where('is_active', true)
-            ->select('id', 'name')
-            ->get()
-            ->mapWithKeys(function($role) {
-                return [$role->id => $role->name];
-            });
+        $roles = Role::whereIn('name', [Role::ADMIN, Role::MANAGER, Role::EMPLOYEE])
+            ->where('is_active', true)
+            ->select('id', 'name', 'description')
+            ->get();
 
         return response()->json([
             'success' => true,
@@ -302,11 +301,12 @@ class UserController extends Controller
     {
         $stats = [
             'total_users' => User::count(),
-            'users_by_role' => User::selectRaw('role, COUNT(*) as count')
-                ->groupBy('role')
+            'users_by_role' => User::with('role')
+                ->selectRaw('role_id, COUNT(*) as count')
+                ->groupBy('role_id')
                 ->get()
                 ->mapWithKeys(function($item) {
-                    return [$item->role => $item->count];
+                    return [$item->role->name => $item->count];
                 }),
             'users_by_department' => User::with('department')
                 ->selectRaw('department_id, COUNT(*) as count')

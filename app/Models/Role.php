@@ -9,6 +9,12 @@ class Role extends Model
 {
     use HasFactory;
 
+    // Role constants
+    const ADMIN = 'admin';
+    const MANAGER = 'manager';
+    const EMPLOYEE = 'employee';
+    const PROCUREMENT = 'procurement';
+
     protected $fillable = [
         'name',
         'description',
@@ -56,5 +62,37 @@ class Role extends Model
             return $p !== $permission;
         });
         $this->update(['permissions' => array_values($permissions)]);
+    }
+
+    /**
+     * Check if role is admin
+     */
+    public function isAdmin()
+    {
+        return $this->name === self::ADMIN;
+    }
+
+    /**
+     * Check if role is manager
+     */
+    public function isManager()
+    {
+        return $this->name === self::MANAGER;
+    }
+
+    /**
+     * Check if role is employee
+     */
+    public function isEmployee()
+    {
+        return $this->name === self::EMPLOYEE;
+    }
+
+    /**
+     * Check if role is procurement
+     */
+    public function isProcurement()
+    {
+        return $this->name === self::PROCUREMENT;
     }
 }

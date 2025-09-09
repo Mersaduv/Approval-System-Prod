@@ -2,7 +2,7 @@ import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 
-export default function Reports() {
+export default function Reports({ auth }) {
     const [activeTab, setActiveTab] = useState('overview')
     const [dateRange, setDateRange] = useState('30')
     const [loading, setLoading] = useState(false)
@@ -68,14 +68,14 @@ export default function Reports() {
                 },
                 {
                     id: 2,
-                    user: { full_name: 'Jane Smith', role: 'HR Manager' },
+                    user: { full_name: 'Jane Smith', role: 'Manager' },
                     action: 'Rejected',
                     request: { item: 'Conference Equipment' },
                     created_at: '2024-01-15T09:15:00Z'
                 },
                 {
                     id: 3,
-                    user: { full_name: 'Mike Johnson', role: 'CEO' },
+                    user: { full_name: 'Mike Johnson', role: 'Admin' },
                     action: 'Approved',
                     request: { item: 'Laptop Computer' },
                     created_at: '2024-01-14T16:45:00Z'
@@ -121,7 +121,7 @@ export default function Reports() {
 
     if (loading) {
         return (
-            <AppLayout title="Reports">
+            <AppLayout title="Reports" auth={auth}>
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                 </div>
@@ -130,7 +130,7 @@ export default function Reports() {
     }
 
     return (
-        <AppLayout title="Reports">
+        <AppLayout title="Reports" auth={auth}>
             <div className="max-w-7xl mx-auto">
                 {/* Header */}
                 <div className="mb-8">

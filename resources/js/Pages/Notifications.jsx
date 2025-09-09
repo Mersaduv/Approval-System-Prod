@@ -2,7 +2,7 @@ import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 
-export default function Notifications() {
+export default function Notifications({ auth }) {
     const [notifications, setNotifications] = useState([])
     const [loading, setLoading] = useState(true)
     const [unreadCount, setUnreadCount] = useState(0)
@@ -108,7 +108,7 @@ export default function Notifications() {
 
     if (loading) {
         return (
-            <AppLayout title="Notifications">
+            <AppLayout title="Notifications" auth={auth}>
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
                 </div>
@@ -117,7 +117,7 @@ export default function Notifications() {
     }
 
     return (
-        <AppLayout title="Notifications">
+        <AppLayout title="Notifications" auth={auth}>
             <div className="max-w-4xl mx-auto">
                 {/* Header */}
                 <div className="flex justify-between items-center mb-8">

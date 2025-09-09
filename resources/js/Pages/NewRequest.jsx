@@ -1,17 +1,18 @@
-import { Head, Link } from '@inertiajs/react'
+import { Head, Link, router } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import axios from 'axios'
 
-export default function NewRequest() {
+export default function NewRequest({ auth }) {
     const [formData, setFormData] = useState({
         item: '',
         description: '',
         amount: '',
-        department: '',
         priority: 'normal'
     })
     const [errors, setErrors] = useState({})
     const [isSubmitting, setIsSubmitting] = useState(false)
+    const [loading, setLoading] = useState(false)
 
     const handleChange = (e) => {
         const { name, value } = e.target
@@ -43,10 +44,6 @@ export default function NewRequest() {
             newErrors.amount = 'Valid amount is required'
         }
 
-        if (!formData.department) {
-            newErrors.department = 'Department is required'
-        }
-
         setErrors(newErrors)
         return Object.keys(newErrors).length === 0
     }
@@ -61,66 +58,64 @@ export default function NewRequest() {
         setIsSubmitting(true)
 
         try {
-            // Simulate API call
-            await new Promise(resolve => setTimeout(resolve, 2000))
-
-            // In real app, this would submit to API
-            console.log('Submitting request:', formData)
-
-            // Reset form
-            setFormData({
-                item: '',
-                description: '',
-                amount: '',
-                department: '',
-                priority: 'normal'
+            const response = await axios.post('/api/requests', {
+                item: formData.item,
+                description: formData.description,
+                amount: parseFloat(formData.amount)
             })
 
-            // Show success message (in real app, this would be handled by Inertia)
-            alert('Request submitted successfully!')
+            if (response.data.success) {
+                // Reset form
+                setFormData({
+                    item: '',
+                    description: '',
+                    amount: '',
+                    priority: 'normal'
+                })
+
+                // Redirect to requests page
+                router.visit('/requests')
+            } else {
+                throw new Error(response.data.message || 'Failed to submit request')
+            }
 
         } catch (error) {
             console.error('Error submitting request:', error)
-            alert('Error submitting request. Please try again.')
+            if (error.response?.data?.errors) {
+                setErrors(error.response.data.errors)
+            } else {
+                alert('Error submitting request: ' + (error.response?.data?.message || error.message))
+            }
         } finally {
             setIsSubmitting(false)
         }
     }
 
-    const departments = [
-        'IT',
-        'HR',
-        'Finance',
-        'Operations',
-        'Sales',
-        'Marketing',
-        'Procurement'
-    ]
 
     return (
-        <AppLayout title="New Request">
+        <AppLayout title="New Request" auth={auth}>
             <div className="max-w-2xl mx-auto">
                 {/* Header */}
-                <div className="mb-8">
-                    <div className="flex items-center space-x-4 mb-4">
+                <div className="mb-6 lg:mb-8">
+                    <div className="flex items-center space-x-3 lg:space-x-4 mb-4">
                         <Link
                             href="/requests"
                             className="text-gray-400 hover:text-gray-600"
                         >
-                            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <svg className="w-5 h-5 lg:w-6 lg:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                             </svg>
                         </Link>
-                        <h1 className="text-3xl font-bold text-gray-900">New Request</h1>
+                        <h1 className="text-2xl lg:text-3xl font-bold text-gray-900">New Request</h1>
                     </div>
-                    <p className="text-gray-600">
+                    <p className="text-sm lg:text-base text-gray-600">
                         Submit a new approval request for items or services
                     </p>
                 </div>
 
                 {/* Form */}
                 <div className="bg-white rounded-lg shadow-sm">
-                    <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                    <form onSubmit={handleSubmit} className="p-4 lg:p-6 space-y-4 lg:space-y-6">
                         {/* Item Name */}
                         <div>
                             <label htmlFor="item" className="block text-sm font-medium text-gray-700 mb-2">
@@ -163,52 +158,27 @@ export default function NewRequest() {
                             )}
                         </div>
 
-                        {/* Amount and Department */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-2">
-                                    Amount (AFN) *
-                                </label>
-                                <input
-                                    type="number"
-                                    id="amount"
-                                    name="amount"
-                                    value={formData.amount}
-                                    onChange={handleChange}
-                                    min="0"
-                                    step="0.01"
-                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                        errors.amount ? 'border-red-300' : 'border-gray-300'
-                                    }`}
-                                    placeholder="0.00"
-                                />
-                                {errors.amount && (
-                                    <p className="mt-1 text-sm text-red-600">{errors.amount}</p>
-                                )}
-                            </div>
-
-                            <div>
-                                <label htmlFor="department" className="block text-sm font-medium text-gray-700 mb-2">
-                                    Department *
-                                </label>
-                                <select
-                                    id="department"
-                                    name="department"
-                                    value={formData.department}
-                                    onChange={handleChange}
-                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                        errors.department ? 'border-red-300' : 'border-gray-300'
-                                    }`}
-                                >
-                                    <option value="">Select Department</option>
-                                    {departments.map(dept => (
-                                        <option key={dept} value={dept}>{dept}</option>
-                                    ))}
-                                </select>
-                                {errors.department && (
-                                    <p className="mt-1 text-sm text-red-600">{errors.department}</p>
-                                )}
-                            </div>
+                        {/* Amount */}
+                        <div>
+                            <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-2">
+                                Amount (AFN) *
+                            </label>
+                            <input
+                                type="number"
+                                id="amount"
+                                name="amount"
+                                value={formData.amount}
+                                onChange={handleChange}
+                                min="0"
+                                step="0.01"
+                                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                    errors.amount ? 'border-red-300' : 'border-gray-300'
+                                }`}
+                                placeholder="0.00"
+                            />
+                            {errors.amount && (
+                                <p className="mt-1 text-sm text-red-600">{errors.amount}</p>
+                            )}
                         </div>
 
                         {/* Priority */}
@@ -228,17 +198,6 @@ export default function NewRequest() {
                                 <option value="high">High - Urgent, needed within 3 days</option>
                                 <option value="critical">Critical - Emergency, needed immediately</option>
                             </select>
-                        </div>
-
-                        {/* Additional Information */}
-                        <div className="bg-gray-50 rounded-lg p-4">
-                            <h3 className="text-sm font-medium text-gray-900 mb-2">Additional Information</h3>
-                            <div className="text-sm text-gray-600 space-y-1">
-                                <p>• Requests over 5,000 AFN require CEO approval</p>
-                                <p>• Purchase-related items require Sales Manager approval</p>
-                                <p>• You will receive email notifications for status updates</p>
-                                <p>• Approval process typically takes 1-3 business days</p>
-                            </div>
                         </div>
 
                         {/* Submit Buttons */}

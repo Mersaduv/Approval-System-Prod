@@ -57,6 +57,10 @@ export default function Dashboard({ auth }) {
             case 'pending': return 'bg-yellow-100 text-yellow-800'
             case 'approved': return 'bg-green-100 text-green-800'
             case 'rejected': return 'bg-red-100 text-red-800'
+            case 'pending procurement': return 'bg-blue-100 text-blue-800'
+            case 'ordered': return 'bg-purple-100 text-purple-800'
+            case 'delivered': return 'bg-green-100 text-green-800'
+            case 'cancelled': return 'bg-gray-100 text-gray-800'
             default: return 'bg-gray-100 text-gray-800'
         }
     }
@@ -81,153 +85,205 @@ export default function Dashboard({ auth }) {
                 </div>
 
                 {/* Stats Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
-                    <div className="bg-white rounded-lg shadow-sm p-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 lg:gap-6 mb-8">
+                    <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6">
                         <div className="flex items-center">
-                            <div className="p-3 bg-blue-100 rounded-lg">
-                                <span className="text-2xl">📊</span>
+                            <div className="p-2 lg:p-3 bg-blue-100 rounded-lg">
+                                <span className="text-lg lg:text-2xl">📊</span>
                             </div>
-                            <div className="ml-4">
-                                <p className="text-sm font-medium text-gray-600">Total Requests</p>
-                                <p className="text-2xl font-bold text-gray-900">{stats.totalRequests}</p>
+                            <div className="ml-3 lg:ml-4">
+                                <p className="text-xs lg:text-sm font-medium text-gray-600">Total Requests</p>
+                                <p className="text-lg lg:text-2xl font-bold text-gray-900">{stats.totalRequests}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow-sm p-6">
+                    <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6">
                         <div className="flex items-center">
-                            <div className="p-3 bg-yellow-100 rounded-lg">
-                                <span className="text-2xl">⏳</span>
+                            <div className="p-2 lg:p-3 bg-yellow-100 rounded-lg">
+                                <span className="text-lg lg:text-2xl">⏳</span>
                             </div>
-                            <div className="ml-4">
-                                <p className="text-sm font-medium text-gray-600">Pending Requests</p>
-                                <p className="text-2xl font-bold text-gray-900">{stats.pendingRequests}</p>
+                            <div className="ml-3 lg:ml-4">
+                                <p className="text-xs lg:text-sm font-medium text-gray-600">Pending Requests</p>
+                                <p className="text-lg lg:text-2xl font-bold text-gray-900">{stats.pendingRequests}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow-sm p-6">
+                    <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6">
                         <div className="flex items-center">
-                            <div className="p-3 bg-green-100 rounded-lg">
-                                <span className="text-2xl">✅</span>
+                            <div className="p-2 lg:p-3 bg-green-100 rounded-lg">
+                                <span className="text-lg lg:text-2xl">✅</span>
                             </div>
-                            <div className="ml-4">
-                                <p className="text-sm font-medium text-gray-600">Approved Requests</p>
-                                <p className="text-2xl font-bold text-gray-900">{stats.approvedRequests}</p>
+                            <div className="ml-3 lg:ml-4">
+                                <p className="text-xs lg:text-sm font-medium text-gray-600">Approved Requests</p>
+                                <p className="text-lg lg:text-2xl font-bold text-gray-900">{stats.approvedRequests}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow-sm p-6">
+                    <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6">
                         <div className="flex items-center">
-                            <div className="p-3 bg-red-100 rounded-lg">
-                                <span className="text-2xl">❌</span>
+                            <div className="p-2 lg:p-3 bg-red-100 rounded-lg">
+                                <span className="text-lg lg:text-2xl">❌</span>
                             </div>
-                            <div className="ml-4">
-                                <p className="text-sm font-medium text-gray-600">Rejected Requests</p>
-                                <p className="text-2xl font-bold text-gray-900">{stats.rejectedRequests}</p>
+                            <div className="ml-3 lg:ml-4">
+                                <p className="text-xs lg:text-sm font-medium text-gray-600">Rejected Requests</p>
+                                <p className="text-lg lg:text-2xl font-bold text-gray-900">{stats.rejectedRequests}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow-sm p-6">
+                    <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6">
                         <div className="flex items-center">
-                            <div className="p-3 bg-purple-100 rounded-lg">
-                                <span className="text-2xl">📝</span>
+                            <div className="p-2 lg:p-3 bg-purple-100 rounded-lg">
+                                <span className="text-lg lg:text-2xl">📝</span>
                             </div>
-                            <div className="ml-4">
-                                <p className="text-sm font-medium text-gray-600">My Requests</p>
-                                <p className="text-2xl font-bold text-gray-900">{stats.myRequests}</p>
+                            <div className="ml-3 lg:ml-4">
+                                <p className="text-xs lg:text-sm font-medium text-gray-600">My Requests</p>
+                                <p className="text-lg lg:text-2xl font-bold text-gray-900">{stats.myRequests}</p>
                             </div>
                         </div>
                     </div>
 
-                    <div className="bg-white rounded-lg shadow-sm p-6">
+                    <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6">
                         <div className="flex items-center">
-                            <div className="p-3 bg-orange-100 rounded-lg">
-                                <span className="text-2xl">🔔</span>
+                            <div className="p-2 lg:p-3 bg-orange-100 rounded-lg">
+                                <span className="text-lg lg:text-2xl">🔔</span>
                             </div>
-                            <div className="ml-4">
-                                <p className="text-sm font-medium text-gray-600">Pending Approvals</p>
-                                <p className="text-2xl font-bold text-gray-900">{stats.pendingApprovals}</p>
+                            <div className="ml-3 lg:ml-4">
+                                <p className="text-xs lg:text-sm font-medium text-gray-600">Pending Approvals</p>
+                                <p className="text-lg lg:text-2xl font-bold text-gray-900">{stats.pendingApprovals}</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 {/* Quick Actions */}
-                <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
-                    <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white rounded-lg shadow-sm p-4 lg:p-6 mb-8">
+                    <h2 className="text-lg lg:text-xl font-semibold text-gray-900 mb-4">Quick Actions</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+                        {/* New Request - Available for all users */}
                         <Link
                             href="/requests/new"
-                            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                             <div className="p-2 bg-blue-100 rounded-lg mr-3">
-                                <span className="text-xl">➕</span>
+                                <span className="text-lg lg:text-xl">➕</span>
                             </div>
-                            <div>
-                                <p className="font-medium text-gray-900">New Request</p>
-                                <p className="text-sm text-gray-500">Submit a new request</p>
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 text-sm lg:text-base">New Request</p>
+                                <p className="text-xs lg:text-sm text-gray-500">Submit a new request</p>
                             </div>
                         </Link>
 
+                        {/* View Requests - Available for all users */}
                         <Link
                             href="/requests"
-                            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                             <div className="p-2 bg-green-100 rounded-lg mr-3">
-                                <span className="text-xl">📋</span>
+                                <span className="text-lg lg:text-xl">📋</span>
                             </div>
-                            <div>
-                                <p className="font-medium text-gray-900">View Requests</p>
-                                <p className="text-sm text-gray-500">Manage all requests</p>
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 text-sm lg:text-base">View Requests</p>
+                                <p className="text-xs lg:text-sm text-gray-500">Manage all requests</p>
                             </div>
                         </Link>
 
+                        {/* Procurement Management - Only for procurement users */}
+                        {auth.user?.role?.name === 'procurement' && (
+                            <Link
+                                href="/procurement"
+                                className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                <div className="p-2 bg-orange-100 rounded-lg mr-3">
+                                    <span className="text-lg lg:text-xl">📦</span>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-gray-900 text-sm lg:text-base">Procurement</p>
+                                    <p className="text-xs lg:text-sm text-gray-500">Manage procurement requests</p>
+                                </div>
+                            </Link>
+                        )}
+
+                        {/* User Management - Only for admin users */}
+                        {auth.user?.role?.name === 'admin' && (
+                            <Link
+                                href="/users"
+                                className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                <div className="p-2 bg-indigo-100 rounded-lg mr-3">
+                                    <span className="text-lg lg:text-xl">👥</span>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-gray-900 text-sm lg:text-base">User Management</p>
+                                    <p className="text-xs lg:text-sm text-gray-500">Manage system users</p>
+                                </div>
+                            </Link>
+                        )}
+
+                        {/* Settings - Only for admin users */}
+                        {auth.user?.role?.name === 'admin' && (
+                            <Link
+                                href="/settings"
+                                className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                <div className="p-2 bg-gray-100 rounded-lg mr-3">
+                                    <span className="text-lg lg:text-xl">⚙️</span>
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                    <p className="font-medium text-gray-900 text-sm lg:text-base">Settings</p>
+                                    <p className="text-xs lg:text-sm text-gray-500">System configuration</p>
+                                </div>
+                            </Link>
+                        )}
+
+                        {/* Notifications - Available for all users */}
                         <Link
                             href="/notifications"
-                            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                             <div className="p-2 bg-yellow-100 rounded-lg mr-3">
-                                <span className="text-xl">🔔</span>
+                                <span className="text-lg lg:text-xl">🔔</span>
                             </div>
-                            <div>
-                                <p className="font-medium text-gray-900">Notifications</p>
-                                <p className="text-sm text-gray-500">View notifications</p>
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 text-sm lg:text-base">Notifications</p>
+                                <p className="text-xs lg:text-sm text-gray-500">View notifications</p>
                             </div>
                         </Link>
 
+                        {/* Reports - Available for all users */}
                         <Link
                             href="/reports"
-                            className="flex items-center p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                             <div className="p-2 bg-purple-100 rounded-lg mr-3">
-                                <span className="text-xl">📊</span>
+                                <span className="text-lg lg:text-xl">📊</span>
                             </div>
-                            <div>
-                                <p className="font-medium text-gray-900">Reports</p>
-                                <p className="text-sm text-gray-500">Generate reports</p>
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 text-sm lg:text-base">Reports</p>
+                                <p className="text-xs lg:text-sm text-gray-500">Generate reports</p>
                             </div>
                         </Link>
                     </div>
                 </div>
 
                 {/* Recent Requests */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
                     <div className="bg-white rounded-lg shadow-sm">
-                        <div className="px-6 py-4 border-b border-gray-200">
+                        <div className="px-4 lg:px-6 py-4 border-b border-gray-200">
                             <div className="flex items-center justify-between">
-                                <h3 className="text-lg font-medium text-gray-900">Recent Requests</h3>
+                                <h3 className="text-base lg:text-lg font-medium text-gray-900">Recent Requests</h3>
                                 <Link
                                     href="/requests"
-                                    className="text-sm text-blue-600 hover:text-blue-800"
+                                    className="text-xs lg:text-sm text-blue-600 hover:text-blue-800"
                                 >
                                     View all
                                 </Link>
                             </div>
                         </div>
-                        <div className="p-6">
+                        <div className="p-4 lg:p-6">
                             <div className="space-y-4">
                                 {recentRequests.map((request) => (
                                     <div key={request.id} className="flex items-center justify-between">
@@ -252,10 +308,10 @@ export default function Dashboard({ auth }) {
 
                     {/* System Status */}
                     <div className="bg-white rounded-lg shadow-sm">
-                        <div className="px-6 py-4 border-b border-gray-200">
-                            <h3 className="text-lg font-medium text-gray-900">System Status</h3>
+                        <div className="px-4 lg:px-6 py-4 border-b border-gray-200">
+                            <h3 className="text-base lg:text-lg font-medium text-gray-900">System Status</h3>
                         </div>
-                        <div className="p-6">
+                        <div className="p-4 lg:p-6">
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between">
                                     <span className="text-sm text-gray-600">System Health</span>

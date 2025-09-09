@@ -12,7 +12,7 @@ class HomeController extends Controller
     {
         return Inertia::render('Home', [
             'auth' => [
-                'user' => Auth::user() ? Auth::user()->load('department') : null
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]
         ]);
     }
@@ -21,7 +21,7 @@ class HomeController extends Controller
     {
         return Inertia::render('Dashboard', [
             'auth' => [
-                'user' => Auth::user() ? Auth::user()->load('department') : null
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]
         ]);
     }
@@ -30,7 +30,7 @@ class HomeController extends Controller
     {
         return Inertia::render('Test', [
             'auth' => [
-                'user' => Auth::user() ? Auth::user()->load('department') : null
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]
         ]);
     }
