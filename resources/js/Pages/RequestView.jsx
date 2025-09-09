@@ -160,6 +160,17 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
         const user = auth.user
         if (!user || !request) return false
 
+        // Only show actions for pending requests
+        if (request.status !== 'Pending') return false
+
+        // New condition: If manager has already approved/rejected, don't show actions
+        if (user.role?.name === 'manager' && hasUserAlreadyApprovedOrRejected()) {
+            return false
+        }
+
+        // Check if it's user's turn to approve
+        if (!isUserTurnToApprove()) return false
+
         // Admin can do everything
         if (user.role?.name === 'admin') return true
 
@@ -168,9 +179,60 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
             return request.employee?.department_id === user.department_id
         }
 
+        return false
+    }
+
+    const isUserTurnToApprove = () => {
+        const user = auth.user
+        if (!user || !request || !request.approval_workflow) return false
+
+        // Check if user has already approved this request
+        if (hasUserAlreadyApproved()) return false
+
+        // Check if user is the next approver
+        const waitingFor = request.approval_workflow.waiting_for
+        if (!waitingFor) return false
+
+        // Check if user's role matches the waiting role
+        if (user.role?.name === 'manager' && waitingFor === 'Manager') {
+            return request.employee?.department_id === user.department_id
+        }
+        if (user.role?.name === 'admin' && waitingFor === 'Admin') {
+            return true
+        }
+
+        return false
+    }
+
+    const hasUserAlreadyApproved = () => {
+        const user = auth.user
+        if (!user || !request || !auditLogs) return false
+
+        // Check if user has already approved this request
+        return auditLogs.some(log =>
+            log.user_id === user.id &&
+            log.action === 'Approved'
+        )
+    }
+
+    const hasUserAlreadyApprovedOrRejected = () => {
+        const user = auth.user
+        if (!user || !request || !auditLogs) return false
+
+        // Check if user has already approved or rejected this request
+        return auditLogs.some(log =>
+            log.user_id === user.id &&
+            (log.action === 'Approved' || log.action === 'Rejected')
+        )
+    }
+
+    const canPerformProcurementAction = () => {
+        const user = auth.user
+        if (!user || !request) return false
+
         // Procurement users can process procurement actions
         if (user.role?.name === 'procurement') {
-            return ['Approved', 'Pending Procurement'].includes(request.status)
+            return ['Approved', 'Pending Procurement', 'Ordered', 'Cancelled'].includes(request.status)
         }
 
         return false
@@ -217,6 +279,13 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
             case 'cancelled': return 'bg-gray-100 text-gray-800'
             default: return 'bg-gray-100 text-gray-800'
         }
+    }
+
+    const getStatusDisplayText = (status, approvalWorkflow) => {
+        if (status === 'Pending' && approvalWorkflow?.waiting_for) {
+            return `Pending (Waiting for ${approvalWorkflow.waiting_for})`
+        }
+        return status
     }
 
     const formatDate = (dateString) => {
@@ -305,7 +374,7 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                     </div>
                     <div className="flex items-center space-x-3">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
-                            {request.status}
+                            {getStatusDisplayText(request.status, request.approval_workflow)}
                         </span>
                     </div>
                 </div>
@@ -335,7 +404,7 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                     <dt className="text-sm font-medium text-gray-500">Status</dt>
                                     <dd className="mt-1">
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
-                                            {request.status}
+                                            {getStatusDisplayText(request.status, request.approval_workflow)}
                                         </span>
                                     </dd>
                                 </div>
@@ -435,30 +504,157 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
 
                     {/* Actions Sidebar */}
                     <div className="space-y-6">
-                        {/* Actions */}
-                        {canPerformAction() && request.status === 'Pending' && (
+                        {/* Approval Workflow Status */}
+                        {request.approval_workflow && (
                             <div className="bg-white shadow-sm rounded-lg p-6">
-                                <h3 className="text-lg font-medium text-gray-900 mb-4">Actions</h3>
-                                <div className="space-y-3">
-                                    <button
-                                        onClick={() => handleAction('approve')}
-                                        className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
-                                    >
-                                        Approve Request
-                                    </button>
-                                    <button
-                                        onClick={() => handleAction('reject')}
-                                        className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium"
-                                    >
-                                        Reject Request
-                                    </button>
+                                <h3 className="text-lg font-medium text-gray-900 mb-4">Approval Workflow</h3>
+                                <div className="space-y-4">
+                                    {/* Workflow Progress */}
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-gray-600">Progress</span>
+                                        <span className="font-medium">
+                                            {request.approval_workflow.current_step} of {request.approval_workflow.total_steps}
+                                        </span>
+                                    </div>
+
+                                    {/* Progress Bar */}
+                                    <div className="w-full bg-gray-200 rounded-full h-2">
+                                        <div
+                                            className={`h-2 rounded-full transition-all duration-300 ${
+                                                request.approval_workflow.current_step === request.approval_workflow.total_steps
+                                                    ? 'bg-green-600'
+                                                    : 'bg-blue-600'
+                                            }`}
+                                            style={{
+                                                width: `${(request.approval_workflow.current_step / request.approval_workflow.total_steps) * 100}%`
+                                            }}
+                                        ></div>
+                                    </div>
+
+                                    {/* Workflow Steps */}
+                                    <div className="space-y-3">
+                                        {request.approval_workflow.steps.map((step, index) => (
+                                            <div key={index} className="flex items-center space-x-3">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
+                                                    step.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                                    step.status === 'pending' ? 'bg-blue-100 text-blue-800' :
+                                                    'bg-gray-100 text-gray-500'
+                                                }`}>
+                                                    {step.status === 'completed' ? '✓' : index + 1}
+                                                </div>
+                                                <div className="flex-1">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className={`text-sm font-medium ${
+                                                            step.status === 'completed' ? 'text-green-800' :
+                                                            step.status === 'pending' ? 'text-blue-800' :
+                                                            'text-gray-500'
+                                                        }`}>
+                                                            {step.role}
+                                                        </span>
+                                                        <span className={`text-xs px-2 py-1 rounded-full ${
+                                                            step.status === 'completed' ? 'bg-green-100 text-green-800' :
+                                                            step.status === 'pending' ? 'bg-blue-100 text-blue-800' :
+                                                            'bg-gray-100 text-gray-500'
+                                                        }`}>
+                                                            {step.status === 'completed' ? 'Completed' :
+                                                             step.status === 'pending' ? 'Pending' :
+                                                             'Waiting'}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-gray-500 mt-1">{step.description}</p>
+                                                    {step.approver && (
+                                                        <p className="text-xs text-gray-400 mt-1">Approver: {step.approver}</p>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+
+                                    {/* Waiting Status */}
+                                    {request.approval_workflow.waiting_for && (
+                                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                            <div className="flex items-center">
+                                                <div className="flex-shrink-0">
+                                                    <svg className="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                                    </svg>
+                                                </div>
+                                                <div className="ml-3">
+                                                    <p className="text-sm font-medium text-yellow-800">
+                                                        ⏳ Waiting for {request.approval_workflow.waiting_for} approval
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
 
+                        {/* Actions */}
+                        {request.status === 'Pending' && (
+                            <div className="bg-white shadow-sm rounded-lg p-6">
+                                <h3 className="text-lg font-medium text-gray-900 mb-4">Actions</h3>
+                                {canPerformAction() ? (
+                                    <div className="space-y-3">
+                                        <button
+                                            onClick={() => handleAction('approve')}
+                                            className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
+                                        >
+                                            Approve Request
+                                        </button>
+                                        <button
+                                            onClick={() => handleAction('reject')}
+                                            className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium"
+                                        >
+                                            Reject Request
+                                        </button>
+                                    </div>
+                                ) : hasUserAlreadyApproved() ? (
+                                    <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                        <div className="flex items-center">
+                                            <div className="flex-shrink-0">
+                                                <svg className="h-5 w-5 text-green-400" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div className="ml-3">
+                                                <p className="text-sm font-medium text-green-800">
+                                                    ✅ You have already approved this request
+                                                </p>
+                                                <p className="text-sm text-green-700 mt-1">
+                                                    Waiting for other approvers to complete the workflow
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                        <div className="flex items-center">
+                                            <div className="flex-shrink-0">
+                                                <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                                                </svg>
+                                            </div>
+                                            <div className="ml-3">
+                                                <p className="text-sm font-medium text-gray-800">
+                                                    ⏳ Waiting for your turn to approve
+                                                </p>
+                                                <p className="text-sm text-gray-700 mt-1">
+                                                    {request.approval_workflow?.waiting_for
+                                                        ? `This request is waiting for ${request.approval_workflow.waiting_for} approval`
+                                                        : 'This request is waiting for previous approvers in the workflow'
+                                                    }
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Procurement Actions */}
-                        {auth.user?.role?.name === 'procurement' &&
-                         (request.status === 'Approved' || request.status === 'Pending Procurement' || request.status === 'Ordered' || request.status === 'Cancelled') && (
+                        {canPerformProcurementAction() && (
                             <div className="bg-white shadow-sm rounded-lg p-6">
                                 <h3 className="text-lg font-medium text-gray-900 mb-4">Procurement Actions</h3>
                                 <div className="space-y-3">

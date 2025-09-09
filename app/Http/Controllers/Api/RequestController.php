@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Services\WorkflowService;
 use App\Models\Request as RequestModel;
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -123,6 +124,9 @@ class RequestController extends Controller
                 'message' => 'Unauthorized to view this request'
             ], 403);
         }
+
+        // Add approval workflow information
+        $request->approval_workflow = $this->getApprovalWorkflowInfo($request);
 
         return response()->json([
             'success' => true,
@@ -273,7 +277,9 @@ class RequestController extends Controller
         }
 
         // Check if user can process procurement
-        if (!Auth::user()->canProcessProcurement()) {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        if (!$user || !$user->canProcessProcurement()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Only procurement team members can process procurement requests'
@@ -310,7 +316,9 @@ class RequestController extends Controller
     {
         try {
             // Check if user can process procurement
-            if (!Auth::user()->canProcessProcurement()) {
+            /** @var \App\Models\User $user */
+            $user = Auth::user();
+            if (!$user || !$user->canProcessProcurement()) {
                 return response()->json([
                     'success' => false,
                     'message' => 'Only procurement team members can view procurement requests'
@@ -395,7 +403,9 @@ class RequestController extends Controller
         }
 
         // Check if user can process procurement
-        if (!Auth::user()->canProcessProcurement()) {
+        /** @var \App\Models\User $user */
+        $user = Auth::user();
+        if (!$user || !$user->canProcessProcurement()) {
             return response()->json([
                 'success' => false,
                 'message' => 'Only procurement team members can rollback requests'
@@ -447,6 +457,297 @@ class RequestController extends Controller
             'success' => true,
             'data' => $auditLogs
         ]);
+    }
+
+    /**
+     * Get approval workflow information for a request
+     */
+    private function getApprovalWorkflowInfo(RequestModel $request): array
+    {
+        $employee = $request->employee;
+        $department = $employee->department;
+        $amount = $request->amount;
+
+        // Get approval rules for this department
+        $rules = \App\Models\ApprovalRule::where('department_id', $department->id)
+            ->where('min_amount', '<=', $amount)
+            ->where('max_amount', '>=', $amount)
+            ->orderBy('order')
+            ->get();
+
+        $workflowInfo = [
+            'is_sequential' => $rules->count() > 1,
+            'current_step' => 1,
+            'total_steps' => $rules->count(),
+            'steps' => [],
+            'next_approver' => null,
+            'waiting_for' => null
+        ];
+
+        if ($rules->isEmpty()) {
+            // Use default workflow
+            $workflowInfo = $this->getDefaultWorkflowInfo($request);
+        } else {
+            // Use dynamic rules
+            $workflowInfo = $this->getDynamicWorkflowInfo($request, $rules);
+        }
+
+        return $workflowInfo;
+    }
+
+    /**
+     * Get default workflow information
+     */
+    private function getDefaultWorkflowInfo(RequestModel $request): array
+    {
+        $employee = $request->employee;
+        $amount = $request->amount;
+
+        // Get thresholds from settings
+        $autoApprovalThreshold = \App\Models\SystemSetting::get('auto_approval_threshold', 1000);
+        $managerOnlyThreshold = \App\Models\SystemSetting::get('manager_only_threshold', 2000);
+        $ceoThreshold = \App\Models\SystemSetting::get('ceo_approval_threshold', 5000);
+
+        $workflowInfo = [
+            'is_sequential' => false,
+            'current_step' => 1,
+            'total_steps' => 1,
+            'steps' => [],
+            'next_approver' => null,
+            'waiting_for' => null
+        ];
+
+        // Auto-approval: no additional approvals needed
+        if ($amount <= $autoApprovalThreshold) {
+            $workflowInfo['steps'] = [
+                ['role' => 'Auto-Approval', 'status' => 'completed', 'description' => 'Request auto-approved based on amount threshold']
+            ];
+            return $workflowInfo;
+        }
+
+        // Manager-only approval
+        if ($amount <= $managerOnlyThreshold) {
+            $manager = $this->getDepartmentManager($employee->department_id);
+            $hasManagerApproval = $this->hasManagerApproval($request);
+
+            $workflowInfo['steps'] = [
+                [
+                    'role' => 'Manager',
+                    'status' => $hasManagerApproval ? 'completed' : 'pending',
+                    'description' => 'Manager approval required',
+                    'approver' => $manager ? $manager->full_name : 'No manager assigned'
+                ]
+            ];
+
+            if (!$hasManagerApproval) {
+                $workflowInfo['waiting_for'] = 'Manager';
+                $workflowInfo['next_approver'] = $manager ? $manager->full_name : 'No manager assigned';
+            }
+
+            return $workflowInfo;
+        }
+
+        // Manager + CEO approval
+        $manager = $this->getDepartmentManager($employee->department_id);
+        $admin = $this->getAdmin();
+        $hasManagerApproval = $this->hasManagerApproval($request);
+        $hasAdminApproval = $this->hasAdminApproval($request);
+
+        $workflowInfo['is_sequential'] = true;
+        $workflowInfo['total_steps'] = 2;
+
+        $steps = [
+            [
+                'role' => 'Manager',
+                'status' => $hasManagerApproval ? 'completed' : 'pending',
+                'description' => 'Manager approval required',
+                'approver' => $manager ? $manager->full_name : 'No manager assigned'
+            ]
+        ];
+
+        if ($amount >= $ceoThreshold) {
+            $steps[] = [
+                'role' => 'Admin/CEO',
+                'status' => $hasAdminApproval ? 'completed' : ($hasManagerApproval ? 'pending' : 'waiting'),
+                'description' => 'CEO approval required for high-value request',
+                'approver' => $admin ? $admin->full_name : 'No admin assigned'
+            ];
+            $workflowInfo['total_steps'] = 2;
+        }
+
+        $workflowInfo['steps'] = $steps;
+
+        // Calculate current step based on completed approvals
+        $completedSteps = 0;
+        if ($hasManagerApproval) $completedSteps++;
+        if ($amount >= $ceoThreshold && $hasAdminApproval) $completedSteps++;
+
+        // Show the actual completed steps, not the next step
+        $workflowInfo['current_step'] = $completedSteps;
+
+        // Determine waiting status
+        if (!$hasManagerApproval) {
+            $workflowInfo['waiting_for'] = 'Manager';
+            $workflowInfo['next_approver'] = $manager ? $manager->full_name : 'No manager assigned';
+        } elseif ($amount >= $ceoThreshold && !$hasAdminApproval) {
+            $workflowInfo['waiting_for'] = 'Admin/CEO';
+            $workflowInfo['next_approver'] = $admin ? $admin->full_name : 'No admin assigned';
+        }
+
+        return $workflowInfo;
+    }
+
+    /**
+     * Get dynamic workflow information
+     */
+    private function getDynamicWorkflowInfo(RequestModel $request, $rules): array
+    {
+        $employee = $request->employee;
+        $workflowInfo = [
+            'is_sequential' => $rules->count() > 1,
+            'current_step' => 1,
+            'total_steps' => $rules->count(),
+            'steps' => [],
+            'next_approver' => null,
+            'waiting_for' => null
+        ];
+
+        $steps = [];
+        $completedSteps = 0;
+        $waitingFor = null;
+        $nextApprover = null;
+
+        foreach ($rules as $index => $rule) {
+            $approver = $this->getApproverByRole($rule->approver_role, $employee->department_id);
+            $hasApproval = $this->hasApprovalFromRole($request, $rule->approver_role, $employee->department_id);
+
+            $stepStatus = 'waiting';
+            if ($hasApproval) {
+                $stepStatus = 'completed';
+                $completedSteps++;
+            } elseif ($index === 0 || $this->hasPreviousApprovals($request, $rules, $index)) {
+                $stepStatus = 'pending';
+                if (!$waitingFor) {
+                    $waitingFor = $rule->approver_role;
+                    $nextApprover = $approver ? $approver->full_name : 'No approver assigned';
+                }
+            }
+
+            $steps[] = [
+                'role' => $rule->approver_role,
+                'status' => $stepStatus,
+                'description' => "Approval required from {$rule->approver_role}",
+                'approver' => $approver ? $approver->full_name : 'No approver assigned',
+                'order' => $rule->order
+            ];
+        }
+
+        $workflowInfo['steps'] = $steps;
+
+        // Show the actual completed steps, not the next step
+        $workflowInfo['current_step'] = $completedSteps;
+
+        $workflowInfo['waiting_for'] = $waitingFor;
+        $workflowInfo['next_approver'] = $nextApprover;
+
+        return $workflowInfo;
+    }
+
+    /**
+     * Check if previous approvals exist for dynamic workflow
+     */
+    private function hasPreviousApprovals(RequestModel $request, $rules, $currentIndex): bool
+    {
+        for ($i = 0; $i < $currentIndex; $i++) {
+            $rule = $rules[$i];
+            if (!$this->hasApprovalFromRole($request, $rule->approver_role, $request->employee->department_id)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Helper methods
+     */
+    private function getDepartmentManager(int $departmentId): ?\App\Models\User
+    {
+        return \App\Models\User::where('department_id', $departmentId)
+            ->whereHas('role', function($query) {
+                $query->where('name', 'manager');
+            })
+            ->first();
+    }
+
+    private function getAdmin(): ?\App\Models\User
+    {
+        return \App\Models\User::whereHas('role', function($query) {
+            $query->where('name', 'admin');
+        })->first();
+    }
+
+    private function getApproverByRole(string $role, int $departmentId): ?\App\Models\User
+    {
+        if ($role === 'Manager' || $role === 'manager') {
+            return \App\Models\User::whereHas('role', function($query) {
+                $query->where('name', 'manager');
+            })
+            ->where('department_id', $departmentId)
+            ->first();
+        } elseif ($role === 'Admin' || $role === 'admin') {
+            return \App\Models\User::whereHas('role', function($query) {
+                $query->where('name', 'admin');
+            })->first();
+        }
+        return null;
+    }
+
+    private function hasManagerApproval(RequestModel $request): bool
+    {
+        return \App\Models\AuditLog::where('request_id', $request->id)
+            ->where('action', 'Approved')
+            ->whereHas('user', function($query) use ($request) {
+                $query->whereHas('role', function($roleQuery) {
+                    $roleQuery->where('name', 'manager');
+                })
+                ->where('department_id', $request->employee->department_id);
+            })
+            ->exists();
+    }
+
+    private function hasAdminApproval(RequestModel $request): bool
+    {
+        return \App\Models\AuditLog::where('request_id', $request->id)
+            ->where('action', 'Approved')
+            ->whereHas('user', function($query) {
+                $query->whereHas('role', function($roleQuery) {
+                    $roleQuery->where('name', 'admin');
+                });
+            })
+            ->exists();
+    }
+
+    private function hasApprovalFromRole(RequestModel $request, string $role, int $departmentId): bool
+    {
+        $query = \App\Models\AuditLog::where('request_id', $request->id)
+            ->where('action', 'Approved')
+            ->whereHas('user', function($query) use ($role, $departmentId) {
+                $query->whereHas('role', function($roleQuery) use ($role) {
+                    if ($role === 'Manager' || $role === 'manager') {
+                        $roleQuery->where('name', 'manager');
+                    } elseif ($role === 'Admin' || $role === 'admin') {
+                        $roleQuery->where('name', 'admin');
+                    } else {
+                        $roleQuery->where('name', $role);
+                    }
+                });
+
+                if ($role === 'Manager' || $role === 'manager') {
+                    $query->where('department_id', $departmentId);
+                }
+            });
+
+        return $query->exists();
     }
 
     /**
