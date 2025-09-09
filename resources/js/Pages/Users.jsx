@@ -343,16 +343,16 @@ export default function Users({ auth }) {
 
                 {/* User Modal */}
                 {showModal && (
-                    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-                        <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
-                            <div className="mt-3">
-                                <h3 className="text-lg font-medium text-gray-900 mb-4">
+                    <div className="fixed inset-0 modal-backdrop overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+                        <div className="relative w-full max-w-2xl bg-white rounded-lg shadow-xl">
+                            <div className="p-6">
+                                <h3 className="text-lg font-medium text-gray-900 mb-6">
                                     {editingUser ? 'Edit User' : 'Add New User'}
                                 </h3>
-                                <form onSubmit={handleSubmit} className="space-y-4">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <form onSubmit={handleSubmit} className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 Full Name *
                                             </label>
                                             <input
@@ -365,7 +365,7 @@ export default function Users({ auth }) {
                                             {errors.full_name && <p className="mt-1 text-sm text-red-600">{errors.full_name[0]}</p>}
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 Email *
                                             </label>
                                             <input
@@ -378,7 +378,7 @@ export default function Users({ auth }) {
                                             {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email[0]}</p>}
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 Password {editingUser ? '(leave blank to keep current)' : '*'}
                                             </label>
                                             <input
@@ -391,7 +391,7 @@ export default function Users({ auth }) {
                                             {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password[0]}</p>}
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 Department *
                                             </label>
                                             <select
@@ -407,8 +407,8 @@ export default function Users({ auth }) {
                                             </select>
                                             {errors.department_id && <p className="mt-1 text-sm text-red-600">{errors.department_id[0]}</p>}
                                         </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <div className="md:col-span-2">
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
                                                 Role *
                                             </label>
                                             <select
@@ -426,8 +426,7 @@ export default function Users({ auth }) {
                                         </div>
                                     </div>
 
-
-                                    <div className="flex justify-end space-x-3 pt-4">
+                                    <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
                                         <button
                                             type="button"
                                             onClick={() => setShowModal(false)}

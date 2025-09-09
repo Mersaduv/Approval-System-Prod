@@ -449,57 +449,59 @@ export default function Settings({ auth }) {
 
                 {/* Department Modal */}
                 {showDepartmentModal && (
-                    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-                        <div className="relative top-10 sm:top-20 mx-auto p-4 sm:p-5 border w-11/12 sm:w-3/4 md:w-1/2 lg:w-1/3 shadow-lg rounded-md bg-white">
-                            <div className="mt-3">
-                                <h3 className="text-lg font-medium text-gray-900 mb-4">
+                    <div className="fixed inset-0 modal-backdrop overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+                        <div className="relative w-full max-w-2xl bg-white rounded-lg shadow-xl">
+                            <div className="p-6">
+                                <h3 className="text-lg font-medium text-gray-900 mb-6">
                                     {editingDepartment ? 'Edit Department' : 'Add New Department'}
                                 </h3>
-                                <form onSubmit={handleDepartmentSubmit} className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Department Name *
-                                        </label>
-                                        <input
-                                            type="text"
-                                            value={departmentForm.name}
-                                            onChange={(e) => setDepartmentForm(prev => ({ ...prev, name: e.target.value }))}
-                                            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${departmentErrors.name ? 'border-red-300' : 'border-gray-300'}`}
-                                            required
-                                        />
-                                        {departmentErrors.name && <p className="mt-1 text-sm text-red-600">{departmentErrors.name[0]}</p>}
+                                <form onSubmit={handleDepartmentSubmit} className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Department Name *
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={departmentForm.name}
+                                                onChange={(e) => setDepartmentForm(prev => ({ ...prev, name: e.target.value }))}
+                                                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${departmentErrors.name ? 'border-red-300' : 'border-gray-300'}`}
+                                                required
+                                            />
+                                            {departmentErrors.name && <p className="mt-1 text-sm text-red-600">{departmentErrors.name[0]}</p>}
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Role *
+                                            </label>
+                                            <select
+                                                value={departmentForm.role_id}
+                                                onChange={(e) => setDepartmentForm(prev => ({ ...prev, role_id: e.target.value }))}
+                                                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${departmentErrors.role_id ? 'border-red-300' : 'border-gray-300'}`}
+                                                required
+                                            >
+                                                <option value="">Select Role</option>
+                                                <option value="1">admin</option>
+                                                <option value="2">manager</option>
+                                                <option value="3">employee</option>
+                                                <option value="4">procurement</option>
+                                            </select>
+                                            {departmentErrors.role_id && <p className="mt-1 text-sm text-red-600">{departmentErrors.role_id[0]}</p>}
+                                        </div>
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
                                             Description
                                         </label>
                                         <textarea
                                             value={departmentForm.description}
                                             onChange={(e) => setDepartmentForm(prev => ({ ...prev, description: e.target.value }))}
-                                            rows={3}
+                                            rows={4}
                                             className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${departmentErrors.description ? 'border-red-300' : 'border-gray-300'}`}
                                         />
                                         {departmentErrors.description && <p className="mt-1 text-sm text-red-600">{departmentErrors.description[0]}</p>}
                                     </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Role *
-                                        </label>
-                                        <select
-                                            value={departmentForm.role_id}
-                                            onChange={(e) => setDepartmentForm(prev => ({ ...prev, role_id: e.target.value }))}
-                                            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${departmentErrors.role_id ? 'border-red-300' : 'border-gray-300'}`}
-                                            required
-                                        >
-                                            <option value="">Select Role</option>
-                                            <option value="1">admin</option>
-                                            <option value="2">manager</option>
-                                            <option value="3">employee</option>
-                                            <option value="4">procurement</option>
-                                        </select>
-                                        {departmentErrors.role_id && <p className="mt-1 text-sm text-red-600">{departmentErrors.role_id[0]}</p>}
-                                    </div>
-                                    <div className="flex justify-end space-x-3 pt-4">
+                                    <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
                                         <button
                                             type="button"
                                             onClick={() => setShowDepartmentModal(false)}

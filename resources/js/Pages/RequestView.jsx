@@ -3,12 +3,17 @@ import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 
-export default function RequestView({ auth, requestId }) {
+export default function RequestView({ auth, requestId, source = 'requests' }) {
     const [request, setRequest] = useState(null)
     const [loading, setLoading] = useState(true)
     const [showActionModal, setShowActionModal] = useState(false)
     const [actionType, setActionType] = useState('')
     const [actionNotes, setActionNotes] = useState('')
+    const [actionData, setActionData] = useState({
+        status: '',
+        final_cost: '',
+        notes: ''
+    })
     const [actionLoading, setActionLoading] = useState(false)
     const [auditLogs, setAuditLogs] = useState([])
 
@@ -46,9 +51,60 @@ export default function RequestView({ auth, requestId }) {
         }
     }
 
-    const handleAction = (action) => {
+    const handleAction = (action, request = null) => {
         setActionType(action)
         setActionNotes('')
+
+        // Initialize action data based on action type
+        if (action === 'procurement') {
+            let status = 'Cancelled'
+            if (request?.status === 'Approved') {
+                status = 'Pending Procurement'
+            } else if (request?.status === 'Pending Procurement') {
+                status = 'Ordered'
+            }
+
+            setActionData({
+                status: status,
+                final_cost: '',
+                notes: ''
+            })
+        } else if (action === 'order') {
+            setActionData({
+                status: request?.status === 'Approved' ? 'Pending Procurement' : 'Ordered',
+                final_cost: '',
+                notes: ''
+            })
+            setActionType('procurement')
+        } else if (action === 'cancel') {
+            setActionData({
+                status: 'Cancelled',
+                final_cost: '',
+                notes: ''
+            })
+            setActionType('procurement')
+        } else if (action === 'deliver') {
+            setActionData({
+                status: 'Delivered',
+                final_cost: '',
+                notes: ''
+            })
+            setActionType('procurement')
+        } else if (action === 'rollback') {
+            setActionData({
+                status: 'Pending Procurement',
+                final_cost: '',
+                notes: ''
+            })
+            setActionType('procurement')
+        } else {
+            setActionData({
+                status: '',
+                final_cost: '',
+                notes: ''
+            })
+        }
+
         setShowActionModal(true)
     }
 
@@ -66,11 +122,20 @@ export default function RequestView({ auth, requestId }) {
             } else if (actionType === 'reject') {
                 endpoint = `/api/requests/${request.id}/reject`
                 data = { reason: actionNotes }
-            } else if (actionType === 'process-procurement') {
-                endpoint = `/api/requests/${request.id}/process-procurement`
-                data = {
-                    status: 'Ordered',
-                    notes: actionNotes
+            } else if (actionType === 'procurement') {
+                // Check if this is a rollback action
+                if (request.status === 'Cancelled' && actionData.status === 'Pending Procurement') {
+                    endpoint = `/api/requests/${request.id}/rollback`
+                    data = {
+                        notes: actionData.notes
+                    }
+                } else {
+                    endpoint = `/api/requests/${request.id}/process-procurement`
+                    data = {
+                        status: actionData.status,
+                        final_cost: actionData.final_cost,
+                        notes: actionData.notes
+                    }
                 }
             }
 
@@ -80,6 +145,7 @@ export default function RequestView({ auth, requestId }) {
                 setShowActionModal(false)
                 setActionType('')
                 setActionNotes('')
+                setActionData({ status: '', final_cost: '', notes: '' })
                 fetchRequestDetails() // Refresh the request data
             }
         } catch (error) {
@@ -100,6 +166,41 @@ export default function RequestView({ auth, requestId }) {
         // Manager can approve/reject requests from their department
         if (user.role?.name === 'manager') {
             return request.employee?.department_id === user.department_id
+        }
+
+        // Procurement users can process procurement actions
+        if (user.role?.name === 'procurement') {
+            return ['Approved', 'Pending Procurement'].includes(request.status)
+        }
+
+        return false
+    }
+
+    const canViewRequest = () => {
+        const user = auth.user
+        if (!user || !request) return false
+
+        // Admin can see everything
+        if (user.role?.name === 'admin') return true
+
+        // Manager can see requests from their department
+        if (user.role?.name === 'manager') {
+            return request.employee?.department_id === user.department_id
+        }
+
+        // Employee can see their own requests
+        if (user.role?.name === 'employee') {
+            return request.employee_id === user.id
+        }
+
+        // Procurement can see their own requests (any status) OR all approved requests
+        if (user.role?.name === 'procurement') {
+            // If it's their own request, they can see it regardless of status
+            if (request.employee_id === user.id) {
+                return true
+            }
+            // Otherwise, they can only see approved requests
+            return ['Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'].includes(request.status)
         }
 
         return false
@@ -140,10 +241,35 @@ export default function RequestView({ auth, requestId }) {
                     <h3 className="text-lg font-medium text-gray-900 mb-2">Request not found</h3>
                     <p className="text-gray-500 mb-4">The request you're looking for doesn't exist or you don't have permission to view it.</p>
                     <Link
-                        href="/requests"
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium"
+                        href={auth.user?.role?.name === 'procurement' ? '/procurement' : '/requests'}
+                        className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                        Back to Requests
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Back
+                    </Link>
+                </div>
+            </AppLayout>
+        )
+    }
+
+    // Check if user can view this request
+    if (!canViewRequest()) {
+        return (
+            <AppLayout title="Access Denied" auth={auth}>
+                <div className="text-center py-12">
+                    <div className="text-gray-400 text-6xl mb-4">🚫</div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Access Denied</h3>
+                    <p className="text-gray-500 mb-4">You don't have permission to view this request.</p>
+                    <Link
+                        href={source === 'procurement' ? '/procurement' : '/requests'}
+                        className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                        <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                        Back
                     </Link>
                 </div>
             </AppLayout>
@@ -155,22 +281,35 @@ export default function RequestView({ auth, requestId }) {
             <div className="space-y-6">
                 {/* Header */}
                 <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-2xl font-bold text-gray-900">Request #{request.id}</h1>
-                        <p className="text-gray-600">Submitted by {request.employee?.full_name}</p>
+                    <div className="flex items-center space-x-4">
+                        <Link
+                            href={source === 'procurement' ? '/procurement' : '/requests'}
+                            className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        >
+                            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                            Back
+                        </Link>
+                        <div>
+                            <div className="flex items-center space-x-3">
+                                <h1 className="text-2xl font-bold text-gray-900">Request #{request.id}</h1>
+                                {source === 'procurement' && (
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                        Procurement View
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-gray-600">Submitted by {request.employee?.full_name}</p>
+                        </div>
                     </div>
                     <div className="flex items-center space-x-3">
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
                             {request.status}
                         </span>
-                        <Link
-                            href="/requests"
-                            className="bg-gray-500 hover:bg-gray-600 text-white px-4 py-2 rounded-md font-medium"
-                        >
-                            Back to Requests
-                        </Link>
                     </div>
                 </div>
+
 
                 {/* Request Details */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -234,6 +373,37 @@ export default function RequestView({ auth, requestId }) {
                             </dl>
                         </div>
 
+                        {/* Procurement Information */}
+                        {auth.user?.role?.name === 'procurement' && request.procurement && (
+                            <div className="bg-white shadow-sm rounded-lg p-6">
+                                <h3 className="text-lg font-medium text-gray-900 mb-4">Procurement Information</h3>
+                                <dl className="grid grid-cols-1 gap-4">
+                                    <div>
+                                        <dt className="text-sm font-medium text-gray-500">Procurement Status</dt>
+                                        <dd className="mt-1">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.procurement.status)}`}>
+                                                {request.procurement.status}
+                                            </span>
+                                        </dd>
+                                    </div>
+                                    {request.procurement.final_cost && (
+                                        <div>
+                                            <dt className="text-sm font-medium text-gray-500">Final Cost</dt>
+                                            <dd className="mt-1 text-sm text-gray-900 font-semibold">${parseFloat(request.procurement.final_cost).toFixed(2)}</dd>
+                                        </div>
+                                    )}
+                                    <div>
+                                        <dt className="text-sm font-medium text-gray-500">Procurement Started</dt>
+                                        <dd className="mt-1 text-sm text-gray-900">{formatDate(request.procurement.created_at)}</dd>
+                                    </div>
+                                    <div>
+                                        <dt className="text-sm font-medium text-gray-500">Last Updated</dt>
+                                        <dd className="mt-1 text-sm text-gray-900">{formatDate(request.procurement.updated_at)}</dd>
+                                    </div>
+                                </dl>
+                            </div>
+                        )}
+
                         {/* Audit Trail */}
                         <div className="bg-white shadow-sm rounded-lg p-6">
                             <h3 className="text-lg font-medium text-gray-900 mb-4">Audit Trail</h3>
@@ -287,40 +457,54 @@ export default function RequestView({ auth, requestId }) {
                         )}
 
                         {/* Procurement Actions */}
-                        {auth.user?.role?.name === 'procurement' && request.status === 'Pending Procurement' && (
+                        {auth.user?.role?.name === 'procurement' &&
+                         (request.status === 'Approved' || request.status === 'Pending Procurement' || request.status === 'Ordered' || request.status === 'Cancelled') && (
                             <div className="bg-white shadow-sm rounded-lg p-6">
                                 <h3 className="text-lg font-medium text-gray-900 mb-4">Procurement Actions</h3>
                                 <div className="space-y-3">
-                                    <button
-                                        onClick={() => handleAction('process-procurement')}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium"
-                                    >
-                                        Process Request
-                                    </button>
+                                    {/* Action Buttons based on status */}
+                                    {(request.status === 'Approved' || request.status === 'Pending Procurement') && (
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={() => handleAction('order', request)}
+                                                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md text-sm font-medium text-center"
+                                            >
+                                                {request.status === 'Approved' ? '🚀 Start Procurement' : '📦 Order'}
+                                            </button>
+                                            <button
+                                                onClick={() => handleAction('cancel', request)}
+                                                className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-medium text-center"
+                                            >
+                                                ❌ Cancel
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {request.status === 'Ordered' && (
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={() => handleAction('deliver', request)}
+                                                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-md text-sm font-medium text-center"
+                                            >
+                                                🚚 Deliver
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {request.status === 'Cancelled' && (
+                                        <div className="flex space-x-2">
+                                            <button
+                                                onClick={() => handleAction('rollback', request)}
+                                                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-md text-sm font-medium text-center"
+                                            >
+                                                🔄 Restore Request
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}
 
-                        {/* Status Information */}
-                        <div className="bg-white shadow-sm rounded-lg p-6">
-                            <h3 className="text-lg font-medium text-gray-900 mb-4">Status Information</h3>
-                            <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-500">Current Status</span>
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
-                                        {request.status}
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-500">Request ID</span>
-                                    <span className="text-sm font-mono text-gray-900">#{request.id}</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-500">Amount</span>
-                                    <span className="text-sm font-semibold text-gray-900">${parseFloat(request.amount).toFixed(2)}</span>
-                                </div>
-                            </div>
-                        </div>
 
                         {/* Quick Actions */}
                         <div className="bg-white shadow-sm rounded-lg p-6">
@@ -330,7 +514,7 @@ export default function RequestView({ auth, requestId }) {
                                     onClick={() => window.print()}
                                     className="w-full text-left text-sm text-blue-600 hover:text-blue-800"
                                 >
-                                    Print Request
+                                    🖨️ Print Request
                                 </button>
                                 <button
                                     onClick={() => {
@@ -340,7 +524,7 @@ export default function RequestView({ auth, requestId }) {
                                     }}
                                     className="w-full text-left text-sm text-blue-600 hover:text-blue-800"
                                 >
-                                    Copy Link
+                                    📋 Copy Link
                                 </button>
                             </div>
                         </div>
@@ -349,60 +533,114 @@ export default function RequestView({ auth, requestId }) {
 
                 {/* Action Modal */}
                 {showActionModal && (
-                    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-                        <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-                            <div className="mt-3">
-                                <div className="flex items-center justify-center w-12 h-12 mx-auto bg-blue-100 rounded-full">
+                    <div className="fixed inset-0 modal-backdrop overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+                        <div className="relative w-full max-w-2xl bg-white rounded-lg shadow-xl">
+                            <div className="p-6">
+                                <div className="flex items-center justify-center w-12 h-12 mx-auto bg-blue-100 rounded-full mb-4">
                                     <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
                                 </div>
-                                <div className="mt-2 px-7 py-3">
-                                    <h3 className="text-lg font-medium text-gray-900 text-center">
-                                        {actionType === 'approve' ? 'Approve Request' : 'Reject Request'}
+                                <div className="text-center mb-6">
+                                    <h3 className="text-lg font-medium text-gray-900">
+                                        {actionType === 'approve' ? 'Approve Request' :
+                                         actionType === 'reject' ? 'Reject Request' :
+                                         actionType === 'procurement' ?
+                                            (request.status === 'Cancelled' && actionData.status === 'Pending Procurement' ? 'Restore Request' :
+                                             actionData.status === 'Pending Procurement' ? 'Start Procurement Process' :
+                                             actionData.status === 'Ordered' ? 'Mark as Ordered' :
+                                             actionData.status === 'Delivered' ? 'Mark as Delivered' :
+                                             actionData.status === 'Cancelled' ? 'Cancel Request' : 'Procurement Action') : 'Action'}
                                     </h3>
-                                    <div className="mt-2 px-7 py-3">
-                                        <p className="text-sm text-gray-500 text-center">
-                                            {actionType === 'approve'
-                                                ? 'Are you sure you want to approve this request?'
-                                                : 'Are you sure you want to reject this request?'
-                                            }
-                                        </p>
-                                        <div className="mt-4">
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                {actionType === 'approve' ? 'Notes (optional)' : 'Reason (required)'}
-                                            </label>
-                                            <textarea
-                                                value={actionNotes}
-                                                onChange={(e) => setActionNotes(e.target.value)}
-                                                rows={3}
-                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                                                placeholder={actionType === 'approve' ? 'Add any notes...' : 'Please provide a reason for rejection...'}
-                                                required={actionType === 'reject'}
-                                            />
-                                        </div>
-                                    </div>
-                                    <div className="items-center px-4 py-3">
-                                        <div className="flex space-x-3">
-                                            <button
-                                                onClick={() => setShowActionModal(false)}
-                                                className="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-300"
-                                            >
-                                                Cancel
-                                            </button>
-                                            <button
-                                                onClick={submitAction}
-                                                disabled={actionLoading || (actionType === 'reject' && !actionNotes.trim())}
-                                                className={`px-4 py-2 text-white text-base font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 ${
-                                                    actionType === 'approve'
-                                                        ? 'bg-green-600 hover:bg-green-700 focus:ring-green-300'
-                                                        : 'bg-red-600 hover:bg-red-700 focus:ring-red-300'
-                                                } ${actionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                            >
-                                                {actionLoading ? 'Processing...' : (actionType === 'approve' ? 'Approve' : 'Reject')}
-                                            </button>
-                                        </div>
-                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                        {actionType === 'procurement' ? (
+                                            <div className="space-y-4">
+                                                <p className="text-sm text-gray-500 text-center">
+                                                    {request.status === 'Cancelled' && actionData.status === 'Pending Procurement' ? 'Restore this cancelled request to pending procurement status' :
+                                                     actionData.status === 'Pending Procurement' ? 'Start procurement process for this request' :
+                                                     actionData.status === 'Ordered' ? 'Mark this request as ordered' :
+                                                     actionData.status === 'Delivered' ? 'Mark this request as delivered' :
+                                                     actionData.status === 'Cancelled' ? 'Cancel this request' :
+                                                     'Process procurement action'}
+                                                </p>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        Final Cost (Optional)
+                                                    </label>
+                                                    <input
+                                                        type="number"
+                                                        step="0.01"
+                                                        min="0"
+                                                        value={actionData.final_cost}
+                                                        onChange={(e) => setActionData(prev => ({ ...prev, final_cost: e.target.value }))}
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                                        placeholder="0.00"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        Notes
+                                                    </label>
+                                                    <textarea
+                                                        value={actionData.notes}
+                                                        onChange={(e) => setActionData(prev => ({ ...prev, notes: e.target.value }))}
+                                                        rows={3}
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                                        placeholder="Add any notes about this action..."
+                                                    />
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <p className="text-sm text-gray-500 text-center">
+                                                    {actionType === 'approve'
+                                                        ? 'Are you sure you want to approve this request?'
+                                                        : 'Are you sure you want to reject this request?'
+                                                    }
+                                                </p>
+                                                <div className="mt-4">
+                                                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                        {actionType === 'approve' ? 'Notes (optional)' : 'Reason (required)'}
+                                                    </label>
+                                                    <textarea
+                                                        value={actionNotes}
+                                                        onChange={(e) => setActionNotes(e.target.value)}
+                                                        rows={3}
+                                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                                        placeholder={actionType === 'approve' ? 'Add any notes...' : 'Please provide a reason for rejection...'}
+                                                        required={actionType === 'reject'}
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
+                                </div>
+                                <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+                                    <button
+                                        onClick={() => setShowActionModal(false)}
+                                        className="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={submitAction}
+                                        disabled={actionLoading ||
+                                            (actionType === 'reject' && !actionNotes.trim()) ||
+                                            (actionType === 'procurement' && !actionData.status)
+                                        }
+                                        className={`px-4 py-2 text-white text-base font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 ${
+                                            actionType === 'approve'
+                                                ? 'bg-green-600 hover:bg-green-700 focus:ring-green-300'
+                                                : actionType === 'reject'
+                                                ? 'bg-red-600 hover:bg-red-700 focus:ring-red-300'
+                                                : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-300'
+                                        } ${actionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        {actionLoading ? 'Processing...' :
+                                         actionType === 'approve' ? 'Approve' :
+                                         actionType === 'reject' ? 'Reject' :
+                                         'Process'}
+                                    </button>
                                 </div>
                             </div>
                         </div>

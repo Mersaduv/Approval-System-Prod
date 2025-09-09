@@ -56,6 +56,16 @@ Route::middleware('auth')->group(function () {
     Route::get('/requests/{id}', function ($id) {
         return inertia('RequestView', [
             'requestId' => $id,
+            'source' => 'requests',
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+    Route::get('/procurement/requests/{id}', function ($id) {
+        return inertia('RequestView', [
+            'requestId' => $id,
+            'source' => 'procurement',
             'auth' => [
                 'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]

@@ -41,6 +41,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::post('/requests/{id}/reject', [RequestController::class, 'reject']);
     Route::post('/requests/{id}/procurement', [RequestController::class, 'updateProcurement']);
     Route::post('/requests/{id}/process-procurement', [RequestController::class, 'processProcurement']);
+    Route::post('/requests/{id}/rollback', [RequestController::class, 'rollbackRequest']);
 
     // Pending approvals
     Route::get('/requests/pending/approvals', [RequestController::class, 'pendingApprovals']);

@@ -1,1 +1,14 @@
 @import "tailwindcss";
+
+/* Global Modal Background Styles */
+.modal-backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-backdrop-light {
+    background-color: rgba(0, 0, 0, 0.3);
+}
+
+.modal-backdrop-very-light {
+    background-color: rgba(0, 0, 0, 0.2);
+}

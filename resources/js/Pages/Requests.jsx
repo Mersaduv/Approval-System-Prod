@@ -42,7 +42,7 @@ export default function Requests({ auth }) {
 
     const canSubmitRequest = () => {
         const user = auth.user
-        return user && (user.role?.name === 'admin' || user.role?.name === 'manager' || user.role?.name === 'employee')
+        return user && (user.role?.name === 'admin' || user.role?.name === 'manager' || user.role?.name === 'employee' || user.role?.name === 'procurement')
     }
 
     const getStatusColor = (status) => {

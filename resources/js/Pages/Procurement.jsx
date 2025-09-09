@@ -8,15 +8,6 @@ export default function Procurement({ auth }) {
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState('')
     const [statusFilter, setStatusFilter] = useState('all')
-    const [showActionModal, setShowActionModal] = useState(false)
-    const [selectedRequest, setSelectedRequest] = useState(null)
-    const [actionType, setActionType] = useState('')
-    const [actionData, setActionData] = useState({
-        status: '',
-        final_cost: '',
-        notes: ''
-    })
-    const [actionLoading, setActionLoading] = useState(false)
 
     useEffect(() => {
         fetchRequests()
@@ -48,46 +39,6 @@ export default function Procurement({ auth }) {
         return matchesSearch
     })
 
-    const handleAction = (request, action) => {
-        setSelectedRequest(request)
-        setActionType(action)
-
-        let status = 'Cancelled'
-        if (action === 'order') {
-            status = request.status === 'Approved' ? 'Pending Procurement' : 'Ordered'
-        } else if (action === 'deliver') {
-            status = 'Delivered'
-        }
-
-        setActionData({
-            status: status,
-            final_cost: '',
-            notes: ''
-        })
-        setShowActionModal(true)
-    }
-
-    const submitAction = async () => {
-        if (!selectedRequest || !actionType) return
-
-        try {
-            setActionLoading(true)
-            const response = await axios.post(`/api/requests/${selectedRequest.id}/process-procurement`, actionData)
-
-            if (response.data.success) {
-                setShowActionModal(false)
-                setSelectedRequest(null)
-                setActionType('')
-                setActionData({ status: '', final_cost: '', notes: '' })
-                fetchRequests() // Refresh the requests
-            }
-        } catch (error) {
-            console.error('Error processing procurement action:', error)
-            alert('Error processing action: ' + (error.response?.data?.message || error.message))
-        } finally {
-            setActionLoading(false)
-        }
-    }
 
     const getStatusColor = (status) => {
         switch (status.toLowerCase()) {
@@ -211,38 +162,12 @@ export default function Procurement({ auth }) {
                                         {new Date(request.created_at).toLocaleDateString()}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <div className="flex space-x-2">
-                                            <Link
-                                                href={`/requests/${request.id}`}
-                                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs"
-                                            >
-                                                View
-                                            </Link>
-                                            {(request.status === 'Approved' || request.status === 'Pending Procurement') && (
-                                                <>
-                                                    <button
-                                                        onClick={() => handleAction(request, 'order')}
-                                                        className="text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100 px-3 py-1 rounded-md text-xs"
-                                                    >
-                                                        {request.status === 'Approved' ? 'Start Procurement' : 'Order'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleAction(request, 'cancel')}
-                                                        className="text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 px-3 py-1 rounded-md text-xs"
-                                                    >
-                                                        Cancel
-                                                    </button>
-                                                </>
-                                            )}
-                                            {request.status === 'Ordered' && (
-                                                <button
-                                                    onClick={() => handleAction(request, 'deliver')}
-                                                    className="text-purple-600 hover:text-purple-900 bg-purple-50 hover:bg-purple-100 px-3 py-1 rounded-md text-xs"
-                                                >
-                                                    Deliver
-                                                </button>
-                                            )}
-                                        </div>
+                                        <Link
+                                            href={`/procurement/requests/${request.id}`}
+                                            className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs"
+                                        >
+                                            View Details
+                                        </Link>
                                     </td>
                                 </tr>
                             ))}
@@ -285,37 +210,13 @@ export default function Procurement({ auth }) {
                                 </div>
                             </div>
 
-                            <div className="mt-4 pt-3 border-t border-gray-200 flex space-x-2">
+                            <div className="mt-4 pt-3 border-t border-gray-200">
                                 <Link
-                                    href={`/requests/${request.id}`}
-                                    className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center"
+                                    href={`/procurement/requests/${request.id}`}
+                                    className="w-full bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center block"
                                 >
                                     View Details
                                 </Link>
-                                {(request.status === 'Approved' || request.status === 'Pending Procurement') && (
-                                    <>
-                                        <button
-                                            onClick={() => handleAction(request, 'order')}
-                                            className="flex-1 bg-green-50 hover:bg-green-100 text-green-600 hover:text-green-900 px-3 py-2 rounded-md text-xs font-medium text-center"
-                                        >
-                                            {request.status === 'Approved' ? 'Start Procurement' : 'Order'}
-                                        </button>
-                                        <button
-                                            onClick={() => handleAction(request, 'cancel')}
-                                            className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-900 px-3 py-2 rounded-md text-xs font-medium text-center"
-                                        >
-                                            Cancel
-                                        </button>
-                                    </>
-                                )}
-                                {request.status === 'Ordered' && (
-                                    <button
-                                        onClick={() => handleAction(request, 'deliver')}
-                                        className="flex-1 bg-purple-50 hover:bg-purple-100 text-purple-600 hover:text-purple-900 px-3 py-2 rounded-md text-xs font-medium text-center"
-                                    >
-                                        Deliver
-                                    </button>
-                                )}
                             </div>
                         </div>
                     ))}
@@ -334,64 +235,6 @@ export default function Procurement({ auth }) {
                     </div>
                 )}
 
-                {/* Action Modal */}
-                {showActionModal && selectedRequest && (
-                    <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
-                        <div className="relative top-10 sm:top-20 mx-auto p-4 sm:p-5 border w-11/12 sm:w-3/4 md:w-1/2 lg:w-1/3 shadow-lg rounded-md bg-white">
-                            <div className="mt-3">
-                                <h3 className="text-lg font-medium text-gray-900 mb-4">
-                                    {actionType === 'order' ? (selectedRequest?.status === 'Approved' ? 'Start Procurement Process' : 'Mark as Ordered') :
-                                     actionType === 'deliver' ? 'Mark as Delivered' :
-                                     'Cancel Request'}
-                                </h3>
-                                <form onSubmit={(e) => { e.preventDefault(); submitAction(); }} className="space-y-4">
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Final Cost (Optional)
-                                        </label>
-                                        <input
-                                            type="number"
-                                            step="0.01"
-                                            min="0"
-                                            value={actionData.final_cost}
-                                            onChange={(e) => setActionData(prev => ({ ...prev, final_cost: e.target.value }))}
-                                            className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                            placeholder="0.00"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Notes
-                                        </label>
-                                        <textarea
-                                            value={actionData.notes}
-                                            onChange={(e) => setActionData(prev => ({ ...prev, notes: e.target.value }))}
-                                            rows={3}
-                                            className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                            placeholder="Add any notes about this action..."
-                                        />
-                                    </div>
-                                    <div className="flex justify-end space-x-3 pt-4">
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowActionModal(false)}
-                                            className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                                        >
-                                            Cancel
-                                        </button>
-                                        <button
-                                            type="submit"
-                                            disabled={actionLoading}
-                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium disabled:opacity-50"
-                                        >
-                                            {actionLoading ? 'Processing...' : 'Confirm'}
-                                        </button>
-                                    </div>
-                                </form>
-                            </div>
-                        </div>
-                    </div>
-                )}
             </div>
         </AppLayout>
     )

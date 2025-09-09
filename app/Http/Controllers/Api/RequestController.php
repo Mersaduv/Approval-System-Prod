@@ -37,6 +37,10 @@ class RequestController extends Controller
                     $q->where('department_id', $user->department_id);
                 });
                 break;
+            case 'procurement':
+                // Procurement users can only see their own requests
+                $query->where('employee_id', $user->id);
+                break;
             case 'admin':
                 // Can see all requests
                 break;
@@ -302,7 +306,7 @@ class RequestController extends Controller
     /**
      * Get procurement requests (all approved requests for procurement team)
      */
-    public function pendingProcurement(): JsonResponse
+    public function pendingProcurement(Request $request): JsonResponse
     {
         try {
             // Check if user can process procurement
@@ -314,10 +318,15 @@ class RequestController extends Controller
             }
 
             // Get all approved requests that are in procurement workflow
-            $requests = RequestModel::whereIn('status', ['Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'])
-                ->with(['employee.department', 'procurement'])
-                ->orderBy('created_at', 'desc')
-                ->get();
+            $query = RequestModel::whereIn('status', ['Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'])
+                ->with(['employee.department', 'procurement']);
+
+            // Apply status filter if provided
+            if ($request->has('status') && $request->status !== 'all') {
+                $query->where('status', $request->status);
+            }
+
+            $requests = $query->orderBy('created_at', 'desc')->get();
 
             return response()->json([
                 'success' => true,
@@ -369,6 +378,52 @@ class RequestController extends Controller
     }
 
     /**
+     * Rollback a cancelled request
+     */
+    public function rollbackRequest(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'notes' => 'nullable|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        // Check if user can process procurement
+        if (!Auth::user()->canProcessProcurement()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Only procurement team members can rollback requests'
+            ], 403);
+        }
+
+        try {
+            $this->workflowService->rollbackCancelledRequest(
+                $id,
+                Auth::id(),
+                $request->input('notes')
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Request restored successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to restore request',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get audit logs for a request
      */
     public function auditLogs(string $id): JsonResponse
@@ -406,6 +461,12 @@ class RequestController extends Controller
                 return $request->employee->department_id === $user->department_id;
             case 'admin':
                 return true;
+            case 'procurement':
+                // Procurement can view their own requests (any status) OR all approved requests
+                if ($request->employee_id === $user->id) {
+                    return true;
+                }
+                return in_array($request->status, ['Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled']);
             default:
                 return false;
         }
