@@ -468,6 +468,16 @@ class RequestController extends Controller
         $department = $employee->department;
         $amount = $request->amount;
 
+        // Check if request is rejected
+        if ($request->status === 'Rejected') {
+            return $this->getRejectedWorkflowInfo($request);
+        }
+
+        // Special handling for procurement users - all steps are auto-approved
+        if ($employee->isProcurement()) {
+            return $this->getProcurementWorkflowInfo($request);
+        }
+
         // Get approval rules for this department
         $rules = \App\Models\ApprovalRule::where('department_id', $department->id)
             ->where('min_amount', '<=', $amount)
@@ -651,6 +661,151 @@ class RequestController extends Controller
         $workflowInfo['next_approver'] = $nextApprover;
 
         return $workflowInfo;
+    }
+
+    /**
+     * Get procurement workflow information - only Admin/CEO approval required
+     */
+    private function getProcurementWorkflowInfo(RequestModel $request): array
+    {
+        $employee = $request->employee;
+        $amount = $request->amount;
+
+        // Get thresholds from settings
+        $autoApprovalThreshold = \App\Models\SystemSetting::get('auto_approval_threshold', 1000);
+
+        // Check if Admin approval is needed
+        $needsAdminApproval = $amount > $autoApprovalThreshold;
+        $hasAdminApproval = $this->hasAdminApproval($request);
+
+        // Get Admin user for display
+        $admin = $this->getApproverByRole('Admin', 0);
+
+        if (!$needsAdminApproval) {
+            // Auto-approved - no steps needed
+            $steps = [];
+            $currentStep = 0;
+            $waitingFor = null;
+        } else {
+            // Admin approval required
+            $stepStatus = $hasAdminApproval ? 'completed' : 'pending';
+            $steps = [
+                [
+                    'role' => 'Admin',
+                    'status' => $stepStatus,
+                    'description' => 'Admin/CEO approval required for procurement request',
+                    'approver' => $admin ? $admin->full_name : 'No admin assigned',
+                    'order' => 1
+                ]
+            ];
+            $currentStep = $hasAdminApproval ? 1 : 0;
+            $waitingFor = $hasAdminApproval ? null : 'Admin';
+        }
+
+        return [
+            'is_sequential' => false,
+            'current_step' => $currentStep,
+            'total_steps' => $needsAdminApproval ? 1 : 0,
+            'steps' => $steps,
+            'next_approver' => $needsAdminApproval && !$hasAdminApproval ? ($admin ? $admin->full_name : 'No admin assigned') : null,
+            'waiting_for' => $waitingFor
+        ];
+    }
+
+    /**
+     * Get rejected workflow information - shows rejection status
+     */
+    private function getRejectedWorkflowInfo(RequestModel $request): array
+    {
+        // Get the rejection details from audit logs
+        $rejectionLog = \App\Models\AuditLog::where('request_id', $request->id)
+            ->where('action', 'Rejected')
+            ->with('user')
+            ->first();
+
+        $rejectedBy = $rejectionLog ? $rejectionLog->user->full_name : 'Unknown';
+        $rejectionReason = $rejectionLog ? $rejectionLog->notes : 'No reason provided';
+
+        // Show the workflow steps that were in progress when rejected
+        $employee = $request->employee;
+        $department = $employee->department;
+        $amount = $request->amount;
+
+        // Get approval rules for this department
+        $rules = \App\Models\ApprovalRule::where('department_id', $department->id)
+            ->where('min_amount', '<=', $amount)
+            ->where('max_amount', '>=', $amount)
+            ->orderBy('order')
+            ->get();
+
+        $steps = [];
+        $completedSteps = 0;
+
+        if ($rules->isEmpty()) {
+            // Use default workflow steps
+            $autoApprovalThreshold = \App\Models\SystemSetting::get('auto_approval_threshold', 1000);
+            $managerOnlyThreshold = \App\Models\SystemSetting::get('manager_only_threshold', 2000);
+            $ceoThreshold = \App\Models\SystemSetting::get('ceo_approval_threshold', 5000);
+
+            if ($amount > $autoApprovalThreshold) {
+                if ($amount <= $managerOnlyThreshold) {
+                    // Manager approval only - show as rejected since request was rejected
+                    $steps[] = [
+                        'role' => 'Manager',
+                        'status' => 'rejected',
+                        'description' => 'Manager approval rejected',
+                        'approver' => $rejectedBy,
+                        'order' => 1
+                    ];
+                    $completedSteps = 0;
+                } else {
+                    // Manager + CEO approval - show as rejected since request was rejected
+                    $steps[] = [
+                        'role' => 'Manager',
+                        'status' => 'rejected',
+                        'description' => 'Manager approval rejected',
+                        'approver' => $rejectedBy,
+                        'order' => 1
+                    ];
+                    
+                    $steps[] = [
+                        'role' => 'Admin',
+                        'status' => 'rejected',
+                        'description' => 'Admin/CEO approval rejected',
+                        'approver' => $rejectedBy,
+                        'order' => 2
+                    ];
+                    
+                    $completedSteps = 0;
+                }
+            }
+        } else {
+            // Use dynamic rules - show all as rejected since request was rejected
+            foreach ($rules as $index => $rule) {
+                $steps[] = [
+                    'role' => $rule->approver_role,
+                    'status' => 'rejected',
+                    'description' => "{$rule->approver_role} approval rejected",
+                    'approver' => $rejectedBy,
+                    'order' => $rule->order
+                ];
+            }
+            $completedSteps = 0;
+        }
+
+        return [
+            'is_sequential' => $rules->count() > 1,
+            'current_step' => $completedSteps,
+            'total_steps' => count($steps),
+            'steps' => $steps,
+            'next_approver' => null,
+            'waiting_for' => null,
+            'rejection_info' => [
+                'rejected_by' => $rejectedBy,
+                'rejection_reason' => $rejectionReason,
+                'rejected_at' => $rejectionLog ? $rejectionLog->created_at : null
+            ]
+        ];
     }
 
     /**

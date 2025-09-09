@@ -148,7 +148,7 @@ class WorkflowService
     }
 
     /**
-     * Process workflow for procurement users - they need CEO/Admin approval
+     * Process workflow for procurement users - requires Admin/CEO approval
      */
     private function processProcurementWorkflow(RequestModel $request): void
     {
@@ -164,10 +164,10 @@ class WorkflowService
             return;
         }
 
-        // For procurement users, all requests above auto-approval threshold need CEO/Admin approval
+        // For procurement users, all requests above auto-approval threshold need Admin/CEO approval
         $admin = $this->getAdmin();
         if ($admin) {
-            $this->sendApprovalRequest($request, $admin, 'CEO approval required for procurement request');
+            $this->sendApprovalRequest($request, $admin, 'Admin/CEO approval required for procurement request');
         }
     }
 
@@ -395,6 +395,20 @@ class WorkflowService
         $amount = $request->amount;
         $department = $employee->department;
 
+        // Special handling for procurement users - check if Admin approval is complete
+        if ($employee->isProcurement()) {
+            $amount = $request->amount;
+            $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
+
+            // Auto-approval: no additional approvals needed
+            if ($amount <= $autoApprovalThreshold) {
+                return true;
+            }
+
+            // For amounts above threshold, check if Admin approval exists
+            return $this->hasAdminApproval($request);
+        }
+
         // Get thresholds from settings
         $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
 
@@ -469,6 +483,21 @@ class WorkflowService
         $employee = $request->employee;
         $amount = $request->amount;
         $department = $employee->department;
+
+        // Special handling for procurement users - check if Admin approval is needed
+        if ($employee->isProcurement()) {
+            $amount = $request->amount;
+            $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
+
+            // For amounts above threshold, check if Admin approval is needed
+            if ($amount > $autoApprovalThreshold && !$this->hasAdminApproval($request)) {
+                $admin = $this->getAdmin();
+                if ($admin) {
+                    $this->sendApprovalRequest($request, $admin, 'Admin/CEO approval required for procurement request');
+                }
+            }
+            return;
+        }
 
         // Check if we're using dynamic rules
         $rules = ApprovalRule::where('department_id', $department->id)

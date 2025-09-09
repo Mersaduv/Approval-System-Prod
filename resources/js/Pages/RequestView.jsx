@@ -538,15 +538,19 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                                                     step.status === 'completed' ? 'bg-green-100 text-green-800' :
                                                     step.status === 'pending' ? 'bg-blue-100 text-blue-800' :
+                                                    step.status === 'rejected' ? 'bg-red-100 text-red-800' :
                                                     'bg-gray-100 text-gray-500'
                                                 }`}>
-                                                    {step.status === 'completed' ? '✓' : index + 1}
+                                                    {step.status === 'completed' ? '✓' :
+                                                     step.status === 'rejected' ? '✗' :
+                                                     index + 1}
                                                 </div>
                                                 <div className="flex-1">
                                                     <div className="flex items-center justify-between">
                                                         <span className={`text-sm font-medium ${
                                                             step.status === 'completed' ? 'text-green-800' :
                                                             step.status === 'pending' ? 'text-blue-800' :
+                                                            step.status === 'rejected' ? 'text-red-800' :
                                                             'text-gray-500'
                                                         }`}>
                                                             {step.role}
@@ -554,10 +558,12 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                                         <span className={`text-xs px-2 py-1 rounded-full ${
                                                             step.status === 'completed' ? 'bg-green-100 text-green-800' :
                                                             step.status === 'pending' ? 'bg-blue-100 text-blue-800' :
+                                                            step.status === 'rejected' ? 'bg-red-100 text-red-800' :
                                                             'bg-gray-100 text-gray-500'
                                                         }`}>
                                                             {step.status === 'completed' ? 'Completed' :
                                                              step.status === 'pending' ? 'Pending' :
+                                                             step.status === 'rejected' ? 'Rejected' :
                                                              'Waiting'}
                                                         </span>
                                                     </div>
@@ -583,6 +589,32 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                                     <p className="text-sm font-medium text-yellow-800">
                                                         ⏳ Waiting for {request.approval_workflow.waiting_for} approval
                                                     </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Rejection Info */}
+                                    {request.approval_workflow.rejection_info && (
+                                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                            <div className="flex items-center">
+                                                <div className="flex-shrink-0">
+                                                    <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                                    </svg>
+                                                </div>
+                                                <div className="ml-3">
+                                                    <p className="text-sm font-medium text-red-800">
+                                                        ❌ Request rejected by {request.approval_workflow.rejection_info.rejected_by}
+                                                    </p>
+                                                    <p className="text-sm text-red-700 mt-1">
+                                                        Reason: {request.approval_workflow.rejection_info.rejection_reason}
+                                                    </p>
+                                                    {request.approval_workflow.rejection_info.rejected_at && (
+                                                        <p className="text-xs text-red-600 mt-1">
+                                                            Rejected at: {new Date(request.approval_workflow.rejection_info.rejected_at).toLocaleString()}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
