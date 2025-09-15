@@ -2,6 +2,7 @@ import { Head, Link, router } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import AlertModal from '../Components/AlertModal'
 
 export default function NewRequest({ auth }) {
     const [formData, setFormData] = useState({
@@ -13,6 +14,15 @@ export default function NewRequest({ auth }) {
     const [errors, setErrors] = useState({})
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [loading, setLoading] = useState(false)
+    const [showAlert, setShowAlert] = useState(false)
+    const [alertMessage, setAlertMessage] = useState('')
+    const [alertType, setAlertType] = useState('info')
+
+    const showAlertMessage = (message, type = 'info') => {
+        setAlertMessage(message)
+        setAlertType(type)
+        setShowAlert(true)
+    }
 
     const handleChange = (e) => {
         const { name, value } = e.target
@@ -84,7 +94,7 @@ export default function NewRequest({ auth }) {
             if (error.response?.data?.errors) {
                 setErrors(error.response.data.errors)
             } else {
-                alert('Error submitting request: ' + (error.response?.data?.message || error.message))
+                showAlertMessage('Error submitting request: ' + (error.response?.data?.message || error.message), 'error')
             }
         } finally {
             setIsSubmitting(false)
@@ -229,6 +239,18 @@ export default function NewRequest({ auth }) {
                     </form>
                 </div>
             </div>
+
+            {/* Alert Modal */}
+            <AlertModal
+                isOpen={showAlert}
+                onClose={() => setShowAlert(false)}
+                title={alertType === 'success' ? 'Success' : alertType === 'error' ? 'Error' : 'Information'}
+                message={alertMessage}
+                type={alertType}
+                buttonText="OK"
+                autoClose={alertType === 'success'}
+                autoCloseDelay={3000}
+            />
         </AppLayout>
     )
 }

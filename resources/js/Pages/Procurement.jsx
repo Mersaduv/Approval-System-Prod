@@ -42,6 +42,8 @@ export default function Procurement({ auth }) {
 
     const getStatusColor = (status) => {
         switch (status.toLowerCase()) {
+            case 'pending procurement verification': return 'bg-yellow-100 text-yellow-800'
+            case 'pending approval': return 'bg-orange-100 text-orange-800'
             case 'approved': return 'bg-green-100 text-green-800'
             case 'pending procurement': return 'bg-blue-100 text-blue-800'
             case 'ordered': return 'bg-purple-100 text-purple-800'
@@ -94,6 +96,8 @@ export default function Procurement({ auth }) {
                         className="block w-full sm:w-40 px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
                     >
                         <option value="all">All Status</option>
+                        <option value="Pending Procurement Verification">Pending Verification</option>
+                        <option value="Pending Approval">Pending Approval</option>
                         <option value="Approved">Approved</option>
                         <option value="Pending Procurement">Pending Procurement</option>
                         <option value="Ordered">Ordered</option>

@@ -2,6 +2,7 @@ import { Head, Link, router } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import AlertModal from '../Components/AlertModal'
 
 export default function RequestView({ auth, requestId, source = 'requests' }) {
     const [request, setRequest] = useState(null)
@@ -16,6 +17,21 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
     })
     const [actionLoading, setActionLoading] = useState(false)
     const [auditLogs, setAuditLogs] = useState([])
+    const [verificationModal, setVerificationModal] = useState(false)
+    const [verificationData, setVerificationData] = useState({
+        status: '',
+        final_price: '',
+        notes: ''
+    })
+    const [showAlert, setShowAlert] = useState(false)
+    const [alertMessage, setAlertMessage] = useState('')
+    const [alertType, setAlertType] = useState('info')
+
+    const showAlertMessage = (message, type = 'info') => {
+        setAlertMessage(message)
+        setAlertType(type)
+        setShowAlert(true)
+    }
 
     useEffect(() => {
         fetchRequestDetails()
@@ -24,16 +40,59 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
     const fetchRequestDetails = async () => {
         try {
             setLoading(true)
-            const response = await axios.get(`/api/requests/${requestId}`)
+
+            // Add debugging
+            console.log('Fetching request details for ID:', requestId)
+            console.log('Current user:', auth.user)
+            console.log('Auth user role:', auth.user?.role?.name)
+
+            // Try to get CSRF token first
+            try {
+                await axios.get('/sanctum/csrf-cookie')
+                console.log('CSRF cookie set successfully')
+            } catch (csrfError) {
+                console.warn('CSRF cookie setting failed:', csrfError)
+            }
+
+            const response = await axios.get(`/api/requests/${requestId}`, {
+                withCredentials: true,
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json',
+                }
+            })
+
+            console.log('API Response:', response.data)
+
             if (response.data.success) {
                 setRequest(response.data.data)
                 fetchAuditLogs()
+            } else {
+                throw new Error(response.data.message || 'Failed to fetch request details')
             }
         } catch (error) {
             console.error('Error fetching request details:', error)
+            console.error('Error response:', error.response)
+            console.error('Error status:', error.response?.status)
+            console.error('Error data:', error.response?.data)
+
             if (error.response?.status === 403) {
-                alert('You are not authorized to view this request')
-                router.visit('/requests')
+                console.error('Access denied - checking user permissions')
+                console.error('User role:', auth.user?.role?.name)
+                console.error('Request ID:', requestId)
+
+                showAlertMessage('You are not authorized to view this request. Please check your permissions.', 'error')
+                // Redirect based on source
+                if (source === 'procurement') {
+                    router.visit('/procurement')
+                } else {
+                    router.visit('/requests')
+                }
+            } else if (error.response?.status === 401) {
+                showAlertMessage('Please login again', 'error')
+                router.visit('/login')
+            } else {
+                showAlertMessage('Error loading request details: ' + (error.response?.data?.message || error.message), 'error')
             }
         } finally {
             setLoading(false)
@@ -48,6 +107,49 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
             }
         } catch (error) {
             console.error('Error fetching audit logs:', error)
+        }
+    }
+
+    const handleVerification = (action) => {
+        setVerificationData({
+            status: action,
+            final_price: '',
+            notes: ''
+        })
+        setVerificationModal(true)
+    }
+
+    const handleVerificationSubmit = async () => {
+        if (!verificationData.notes.trim()) {
+            showAlertMessage('Please provide notes for the verification', 'warning')
+            return
+        }
+
+        if (verificationData.status === 'Verified' && !verificationData.final_price) {
+            showAlertMessage('Please provide final price for verification', 'warning')
+            return
+        }
+
+        try {
+            setActionLoading(true)
+
+            const response = await axios.post(`/api/requests/${requestId}/verify`, {
+                status: verificationData.status,
+                final_price: verificationData.final_price ? parseFloat(verificationData.final_price) : null,
+                notes: verificationData.notes
+            })
+
+            if (response.data.success) {
+                setVerificationModal(false)
+                fetchRequestDetails() // Refresh the request details
+            } else {
+                throw new Error(response.data.message || 'Failed to submit verification')
+            }
+        } catch (error) {
+            console.error('Error submitting verification:', error)
+            showAlertMessage('Error submitting verification: ' + (error.response?.data?.message || error.message), 'error')
+        } finally {
+            setActionLoading(false)
         }
     }
 
@@ -150,7 +252,7 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
             }
         } catch (error) {
             console.error('Error performing action:', error)
-            alert('Error performing action: ' + (error.response?.data?.message || error.message))
+            showAlertMessage('Error performing action: ' + (error.response?.data?.message || error.message), 'error')
         } finally {
             setActionLoading(false)
         }
@@ -160,8 +262,15 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
         const user = auth.user
         if (!user || !request) return false
 
-        // Only show actions for pending requests
-        if (request.status !== 'Pending') return false
+        // Show actions for pending requests (both 'Pending', 'Pending Approval', and 'Pending Procurement Verification')
+        if (!['Pending', 'Pending Approval', 'Pending Procurement Verification'].includes(request.status)) return false
+
+        // Procurement users can verify requests
+        if (user.role?.name === 'procurement' &&
+            request.status === 'Pending Procurement Verification' &&
+            request.procurement_status === 'Pending Verification') {
+            return true
+        }
 
         // New condition: If manager has already approved/rejected, don't show actions
         if (user.role?.name === 'manager' && hasUserAlreadyApprovedOrRejected()) {
@@ -186,18 +295,21 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
         const user = auth.user
         if (!user || !request || !request.approval_workflow) return false
 
-        // Check if user has already approved this request
-        if (hasUserAlreadyApproved()) return false
+        // Check if user has already approved or rejected this request
+        if (hasUserAlreadyApprovedOrRejected()) return false
 
         // Check if user is the next approver
         const waitingFor = request.approval_workflow.waiting_for
         if (!waitingFor) return false
 
         // Check if user's role matches the waiting role
-        if (user.role?.name === 'manager' && waitingFor === 'Manager') {
+        if (user.role?.name === 'manager' && (waitingFor === 'Manager' || waitingFor === 'Manager Approval')) {
             return request.employee?.department_id === user.department_id
         }
-        if (user.role?.name === 'admin' && waitingFor === 'Admin') {
+        if (user.role?.name === 'admin' && (waitingFor === 'Admin' || waitingFor === 'CEO/Admin Approval')) {
+            return true
+        }
+        if (user.role?.name === 'procurement' && (waitingFor === 'Procurement' || waitingFor === 'Procurement Verification' || waitingFor === 'Procurement Processing')) {
             return true
         }
 
@@ -245,9 +357,17 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
         // Admin can see everything
         if (user.role?.name === 'admin') return true
 
-        // Manager can see requests from their department
+        // Manager can see requests from their department OR requests assigned to them in workflow steps
         if (user.role?.name === 'manager') {
-            return request.employee?.department_id === user.department_id
+            // Check if request is from their department
+            if (request.employee?.department_id === user.department_id) {
+                return true
+            }
+
+            // Check if request is assigned to them personally in workflow steps
+            // This will be handled by the backend API, so we'll allow it for now
+            // and let the backend determine if the user can view it
+            return ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'].includes(request.status)
         }
 
         // Employee can see their own requests
@@ -255,17 +375,22 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
             return request.employee_id === user.id
         }
 
-        // Procurement can see their own requests (any status) OR all approved requests
+        // Procurement can see their own requests (any status) OR requests assigned to them in workflow steps
         if (user.role?.name === 'procurement') {
             // If it's their own request, they can see it regardless of status
             if (request.employee_id === user.id) {
                 return true
             }
-            // Otherwise, they can only see approved requests
-            return ['Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'].includes(request.status)
+
+            // Otherwise, they can see requests assigned to them in workflow steps
+            // This will be handled by the backend API, so we'll allow it for now
+            // and let the backend determine if the user can view it
+            return ['Pending Procurement Verification', 'Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'].includes(request.status)
         }
 
-        return false
+        // For other roles, check if they are assigned to workflow steps
+        // This will be handled by the backend API
+        return ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'].includes(request.status)
     }
 
     const getStatusColor = (status) => {
@@ -273,6 +398,8 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
             case 'pending': return 'bg-yellow-100 text-yellow-800'
             case 'approved': return 'bg-green-100 text-green-800'
             case 'rejected': return 'bg-red-100 text-red-800'
+            case 'pending procurement verification': return 'bg-orange-100 text-orange-800'
+            case 'pending approval': return 'bg-blue-100 text-blue-800'
             case 'pending procurement': return 'bg-blue-100 text-blue-800'
             case 'ordered': return 'bg-purple-100 text-purple-800'
             case 'delivered': return 'bg-green-100 text-green-800'
@@ -284,6 +411,12 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
     const getStatusDisplayText = (status, approvalWorkflow) => {
         if (status === 'Pending' && approvalWorkflow?.waiting_for) {
             return `Pending (Waiting for ${approvalWorkflow.waiting_for})`
+        }
+        if (status === 'Pending Procurement Verification') {
+            return 'Pending Procurement Verification'
+        }
+        if (status === 'Pending Approval') {
+            return 'Pending Approval'
         }
         return status
     }
@@ -376,6 +509,7 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                         <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(request.status)}`}>
                             {getStatusDisplayText(request.status, request.approval_workflow)}
                         </span>
+
                     </div>
                 </div>
 
@@ -534,7 +668,7 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                     {/* Workflow Steps */}
                                     <div className="space-y-3">
                                         {request.approval_workflow.steps.map((step, index) => (
-                                            <div key={index} className="flex items-center space-x-3">
+                                            <div key={step.id || index} className="flex items-center space-x-3">
                                                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
                                                     step.status === 'completed' ? 'bg-green-100 text-green-800' :
                                                     step.status === 'pending' ? 'bg-blue-100 text-blue-800' :
@@ -543,18 +677,33 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                                 }`}>
                                                     {step.status === 'completed' ? '✓' :
                                                      step.status === 'rejected' ? '✗' :
-                                                     index + 1}
+                                                     step.order !== undefined ? step.order + 1 : index + 1}
                                                 </div>
                                                 <div className="flex-1">
                                                     <div className="flex items-center justify-between">
-                                                        <span className={`text-sm font-medium ${
-                                                            step.status === 'completed' ? 'text-green-800' :
-                                                            step.status === 'pending' ? 'text-blue-800' :
-                                                            step.status === 'rejected' ? 'text-red-800' :
-                                                            'text-gray-500'
-                                                        }`}>
-                                                            {step.role}
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`text-sm font-medium ${
+                                                                step.status === 'completed' ? 'text-green-800' :
+                                                                step.status === 'pending' ? 'text-blue-800' :
+                                                                step.status === 'rejected' ? 'text-red-800' :
+                                                                'text-gray-500'
+                                                            }`}>
+                                                                {step.name || step.role}
+                                                            </span>
+                                                            {step.step_type && (
+                                                                <span className={`text-xs px-2 py-1 rounded-full ${
+                                                                    step.step_type === 'approval' ? 'bg-blue-100 text-blue-800' :
+                                                                    step.step_type === 'verification' ? 'bg-yellow-100 text-yellow-800' :
+                                                                    step.step_type === 'notification' ? 'bg-purple-100 text-purple-800' :
+                                                                    'bg-gray-100 text-gray-600'
+                                                                }`}>
+                                                                    {step.step_type === 'approval' ? 'Approval' :
+                                                                     step.step_type === 'verification' ? 'Verification' :
+                                                                     step.step_type === 'notification' ? 'Notification' :
+                                                                     step.step_type}
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <span className={`text-xs px-2 py-1 rounded-full ${
                                                             step.status === 'completed' ? 'bg-green-100 text-green-800' :
                                                             step.status === 'pending' ? 'bg-blue-100 text-blue-800' :
@@ -568,9 +717,19 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                                         </span>
                                                     </div>
                                                     <p className="text-xs text-gray-500 mt-1">{step.description}</p>
-                                                    {step.approver && (
-                                                        <p className="text-xs text-gray-400 mt-1">Approver: {step.approver}</p>
-                                                    )}
+                                                    <div className="flex items-center gap-4 mt-1">
+                                                        {step.approver && step.approver !== 'Not assigned' && (
+                                                            <p className="text-xs text-gray-400">Approver: {step.approver}</p>
+                                                        )}
+                                                        {step.timeout_hours && (
+                                                            <p className="text-xs text-gray-400">Timeout: {step.timeout_hours}h</p>
+                                                        )}
+                                                        {step.assignments && step.assignments.length > 0 && (
+                                                            <p className="text-xs text-gray-400">
+                                                                Assignments: {step.assignments.length}
+                                                            </p>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
@@ -578,16 +737,33 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
 
                                     {/* Waiting Status */}
                                     {request.approval_workflow.waiting_for && (
-                                        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                        <div className={`border rounded-lg p-4 ${
+                                            request.approval_workflow.can_approve
+                                                ? 'bg-green-50 border-green-200'
+                                                : 'bg-yellow-50 border-yellow-200'
+                                        }`}>
                                             <div className="flex items-center">
                                                 <div className="flex-shrink-0">
-                                                    <svg className="h-5 w-5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                                    <svg className={`h-5 w-5 ${
+                                                        request.approval_workflow.can_approve
+                                                            ? 'text-green-400'
+                                                            : 'text-yellow-400'
+                                                    }`} fill="currentColor" viewBox="0 0 20 20">
+                                                        {request.approval_workflow.can_approve ? (
+                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                        ) : (
+                                                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                                        )}
                                                     </svg>
                                                 </div>
                                                 <div className="ml-3">
-                                                    <p className="text-sm font-medium text-yellow-800">
-                                                        ⏳ Waiting for {request.approval_workflow.waiting_for} approval
+                                                    <p className={`text-sm font-medium ${
+                                                        request.approval_workflow.can_approve
+                                                            ? 'text-green-800'
+                                                            : 'text-yellow-800'
+                                                    }`}>
+                                                        {request.approval_workflow.can_approve_message ||
+                                                         `⏳ Waiting for ${request.approval_workflow.waiting_for} approval`}
                                                     </p>
                                                 </div>
                                             </div>
@@ -624,23 +800,49 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                         )}
 
                         {/* Actions */}
-                        {request.status === 'Pending' && (
+                        {['Pending', 'Pending Approval', 'Pending Procurement Verification'].includes(request.status) && (
                             <div className="bg-white shadow-sm rounded-lg p-6">
                                 <h3 className="text-lg font-medium text-gray-900 mb-4">Actions</h3>
-                                {canPerformAction() ? (
+                                {(canPerformAction() || request.approval_workflow?.can_approve) && !hasUserAlreadyApprovedOrRejected() ? (
                                     <div className="space-y-3">
-                                        <button
-                                            onClick={() => handleAction('approve')}
-                                            className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
-                                        >
-                                            Approve Request
-                                        </button>
-                                        <button
-                                            onClick={() => handleAction('reject')}
-                                            className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium"
-                                        >
-                                            Reject Request
-                                        </button>
+                                        {/* Procurement Verification Buttons */}
+                                        {auth.user?.role?.name === 'procurement' &&
+                                         request.status === 'Pending Procurement Verification' &&
+                                         request.procurement_status === 'Pending Verification' && (
+                                            <>
+                                                <button
+                                                    onClick={() => handleVerification('Verified')}
+                                                    className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
+                                                >
+                                                    Verify
+                                                </button>
+                                                <button
+                                                    onClick={() => handleVerification('Not Available')}
+                                                    className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium"
+                                                >
+                                                    Reject
+                                                </button>
+                                            </>
+                                        )}
+
+                                        {/* Manager/Admin Approval Buttons */}
+                                        {((request.status === 'Pending' || request.status === 'Pending Approval') ||
+                                          (request.approval_workflow?.can_approve && ['manager', 'admin'].includes(auth.user?.role?.name))) && (
+                                            <>
+                                                <button
+                                                    onClick={() => handleAction('approve')}
+                                                    className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium"
+                                                >
+                                                    Approve Request
+                                                </button>
+                                                <button
+                                                    onClick={() => handleAction('reject')}
+                                                    className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md font-medium"
+                                                >
+                                                    Reject Request
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 ) : hasUserAlreadyApproved() ? (
                                     <div className="bg-green-50 border border-green-200 rounded-lg p-4">
@@ -748,7 +950,7 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                                     onClick={() => {
                                         const url = window.location.href
                                         navigator.clipboard.writeText(url)
-                                        alert('Request URL copied to clipboard')
+                                        // URL copied to clipboard - no need to show message
                                     }}
                                     className="w-full text-left text-sm text-blue-600 hover:text-blue-800"
                                 >
@@ -874,7 +1076,128 @@ export default function RequestView({ auth, requestId, source = 'requests' }) {
                         </div>
                     </div>
                 )}
+
+                {/* Verification Modal */}
+                {verificationModal && (
+                    <div className="fixed inset-0 modal-backdrop overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4">
+                        <div className="relative w-full max-w-2xl bg-white rounded-lg shadow-xl">
+                            <div className="p-6">
+                                <div className="flex items-center justify-center w-12 h-12 mx-auto bg-blue-100 rounded-full mb-4">
+                                    <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                </div>
+                                <div className="text-center mb-6">
+                                    <h3 className="text-lg font-medium text-gray-900">
+                                        {verificationData.status === 'Verified' ? 'Verify Request' : 'Reject Request'}
+                                    </h3>
+                                    <p className="text-sm text-gray-500 mt-2">
+                                        {verificationData.status === 'Verified'
+                                            ? 'Please provide the final price and verification notes'
+                                            : 'Please provide the reason for rejection'
+                                        }
+                                    </p>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {/* Status Display */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            Verification Status
+                                        </label>
+                                        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${
+                                            verificationData.status === 'Verified'
+                                                ? 'bg-green-100 text-green-800'
+                                                : 'bg-red-100 text-red-800'
+                                        }`}>
+                                            {verificationData.status === 'Verified' ? '✓ Verified' : '✗ Rejected'}
+                                        </div>
+                                    </div>
+
+                                    {/* Final Price (only for Verified) */}
+                                    {verificationData.status === 'Verified' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Final Amount (AFN) <span className="text-red-500">*</span>
+                                            </label>
+                                            <input
+                                                type="number"
+                                                step="0.01"
+                                                min="0"
+                                                value={verificationData.final_price}
+                                                onChange={(e) => setVerificationData({
+                                                    ...verificationData,
+                                                    final_price: e.target.value
+                                                })}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                                placeholder="Enter final amount"
+                                                required
+                                            />
+                                        </div>
+                                    )}
+
+                                    {/* Notes */}
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                            {verificationData.status === 'Verified' ? 'Verification Notes' : 'Rejection Reason'} <span className="text-red-500">*</span>
+                                        </label>
+                                        <textarea
+                                            value={verificationData.notes}
+                                            onChange={(e) => setVerificationData({
+                                                ...verificationData,
+                                                notes: e.target.value
+                                            })}
+                                            rows={3}
+                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                                            placeholder={verificationData.status === 'Verified'
+                                                ? 'Enter verification notes...'
+                                                : 'Enter rejection reason...'
+                                            }
+                                            required
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="flex justify-end space-x-3 pt-6 border-t border-gray-200">
+                                    <button
+                                        onClick={() => setVerificationModal(false)}
+                                        className="px-4 py-2 bg-gray-500 text-white text-base font-medium rounded-md shadow-sm hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-300"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleVerificationSubmit}
+                                        disabled={actionLoading ||
+                                            !verificationData.notes.trim() ||
+                                            (verificationData.status === 'Verified' && !verificationData.final_price)
+                                        }
+                                        className={`px-4 py-2 text-white text-base font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 ${
+                                            verificationData.status === 'Verified'
+                                                ? 'bg-green-600 hover:bg-green-700 focus:ring-green-300'
+                                                : 'bg-red-600 hover:bg-red-700 focus:ring-red-300'
+                                        } ${actionLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        {actionLoading ? 'Processing...' :
+                                         verificationData.status === 'Verified' ? 'Submit Verification' : 'Submit Rejection'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
+
+            {/* Alert Modal */}
+            <AlertModal
+                isOpen={showAlert}
+                onClose={() => setShowAlert(false)}
+                title={alertType === 'success' ? 'Success' : alertType === 'error' ? 'Error' : alertType === 'warning' ? 'Warning' : 'Information'}
+                message={alertMessage}
+                type={alertType}
+                buttonText="OK"
+                autoClose={alertType === 'success'}
+                autoCloseDelay={3000}
+            />
         </AppLayout>
     )
 }

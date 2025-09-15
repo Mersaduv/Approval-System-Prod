@@ -62,6 +62,26 @@ class NotificationService
     }
 
     /**
+     * Send notification to procurement team for verification
+     */
+    public function sendProcurementVerificationRequest(RequestModel $request): void
+    {
+        // Get procurement users
+        $procurementUsers = User::whereHas('role', function($query) {
+            $query->where('name', 'procurement');
+        })->get();
+
+        foreach ($procurementUsers as $user) {
+            $this->sendInAppNotification(
+                $request,
+                $user->id,
+                'Procurement Verification Required',
+                "New request requires procurement verification: {$request->item} - Amount: {$request->amount} AFN"
+            );
+        }
+    }
+
+    /**
      * Send notification to procurement team
      */
     public function sendProcurementNotification(RequestModel $request): void
@@ -112,6 +132,8 @@ class NotificationService
             'approved' => "Your request for {$request->item} has been approved and forwarded to procurement.",
             'rejected' => "Your request for {$request->item} has been rejected. Reason: {$reason}",
             'delivered' => "Your request for {$request->item} has been delivered successfully.",
+            'procurement_verified' => "Your request for {$request->item} has been verified by procurement and sent for approval.",
+            'procurement_rejected' => "Your request for {$request->item} has been rejected by procurement. Reason: {$reason}",
             default => "Your request for {$request->item} has been updated."
         };
     }
@@ -125,6 +147,8 @@ class NotificationService
             'approved' => 'Request Approved',
             'rejected' => 'Request Rejected',
             'delivered' => 'Request Delivered',
+            'procurement_verified' => 'Request Verified by Procurement',
+            'procurement_rejected' => 'Request Rejected by Procurement',
             default => 'Request Update'
         };
     }

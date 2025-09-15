@@ -15,10 +15,17 @@ class Request extends Model
         'description',
         'amount',
         'status',
+        'procurement_status',
+        'final_price',
+        'procurement_notes',
+        'verified_by',
+        'verified_at',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
+        'final_price' => 'decimal:2',
+        'verified_at' => 'datetime',
     ];
 
     public function employee()
@@ -39,5 +46,10 @@ class Request extends Model
     public function procurement()
     {
         return $this->hasOne(Procurement::class);
+    }
+
+    public function verifiedBy()
+    {
+        return $this->belongsTo(User::class, 'verified_by');
     }
 }

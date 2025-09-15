@@ -55,6 +55,7 @@ export default function Dashboard({ auth }) {
     const getStatusColor = (status) => {
         switch (status.toLowerCase()) {
             case 'pending': return 'bg-yellow-100 text-yellow-800'
+            case 'pending procurement verification': return 'bg-orange-100 text-orange-800'
             case 'approved': return 'bg-green-100 text-green-800'
             case 'rejected': return 'bg-red-100 text-red-800'
             case 'pending procurement': return 'bg-blue-100 text-blue-800'
@@ -193,18 +194,32 @@ export default function Dashboard({ auth }) {
 
                         {/* Procurement Management - Only for procurement users */}
                         {auth.user?.role?.name === 'procurement' && (
-                            <Link
-                                href="/procurement"
-                                className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                            >
-                                <div className="p-2 bg-orange-100 rounded-lg mr-3">
-                                    <span className="text-lg lg:text-xl">📦</span>
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                    <p className="font-medium text-gray-900 text-sm lg:text-base">Procurement</p>
-                                    <p className="text-xs lg:text-sm text-gray-500">Manage procurement requests</p>
-                                </div>
-                            </Link>
+                            <>
+                                <Link
+                                    href="/procurement/verification"
+                                    className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                >
+                                    <div className="p-2 bg-blue-100 rounded-lg mr-3">
+                                        <span className="text-lg lg:text-xl">🔍</span>
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="font-medium text-gray-900 text-sm lg:text-base">Verification</p>
+                                        <p className="text-xs lg:text-sm text-gray-500">Verify market availability</p>
+                                    </div>
+                                </Link>
+                                <Link
+                                    href="/procurement"
+                                    className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                                >
+                                    <div className="p-2 bg-orange-100 rounded-lg mr-3">
+                                        <span className="text-lg lg:text-xl">📦</span>
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="font-medium text-gray-900 text-sm lg:text-base">Procurement</p>
+                                        <p className="text-xs lg:text-sm text-gray-500">Manage procurement requests</p>
+                                    </div>
+                                </Link>
+                            </>
                         )}
 
                         {/* User Management - Only for admin users */}

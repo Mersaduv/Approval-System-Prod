@@ -2,6 +2,99 @@ import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import ConfirmationModal from '../Components/ConfirmationModal'
+import AlertModal from '../Components/AlertModal'
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+} from '@dnd-kit/core'
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import {
+    useSortable,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+
+// Sortable Workflow Step Component
+function SortableWorkflowStep({ step }) {
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: step.id })
+
+    const style = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    }
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className={`flex items-center justify-between py-2 px-3 bg-gray-50 rounded sortable-item ${isDragging ? 'dragging' : ''}`}
+        >
+            <div className="flex-1">
+                <div className="flex items-center gap-2">
+                    <div
+                        {...attributes}
+                        {...listeners}
+                        className="drag-handle p-1 text-gray-400 hover:text-gray-600 cursor-grab hover:cursor-grabbing"
+                        title="Drag to reorder"
+                    >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M11 18c0 1.1-.9 2-2 2s-2-.9-2-2 .9-2 2-2 2 .9 2 2zm-2-8c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0-6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm6 4c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/>
+                        </svg>
+                    </div>
+                    <span className="text-sm font-medium text-gray-700">
+                        {step.order_index + 1}. {step.name}
+                    </span>
+                    <span className={`text-xs px-2 py-1 rounded ${
+                        step.step_type === 'approval'
+                            ? 'bg-blue-100 text-blue-800'
+                            : step.step_type === 'verification'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : 'bg-purple-100 text-purple-800'
+                    }`}>
+                        {step.step_type}
+                    </span>
+                </div>
+                {step.description && (
+                    <p className="text-xs text-gray-500 mt-1">{step.description}</p>
+                )}
+                <div className="flex items-center gap-2 mt-1">
+                    <span className="text-xs text-gray-500">
+                        Assignments: {step.assignments_count}
+                    </span>
+                    {step.timeout_hours && (
+                        <span className="text-xs text-gray-500">
+                            Timeout: {step.timeout_hours}h
+                        </span>
+                    )}
+                </div>
+            </div>
+            <span className={`text-xs px-2 py-1 rounded ${
+                step.is_active
+                    ? 'text-green-600 bg-green-100'
+                    : 'text-red-600 bg-red-100'
+            }`}>
+                {step.is_active ? 'Active' : 'Inactive'}
+            </span>
+        </div>
+    )
+}
 
 export default function Settings({ auth }) {
     const [activeTab, setActiveTab] = useState('general')
@@ -25,10 +118,41 @@ export default function Settings({ auth }) {
     })
     const [settingsLoading, setSettingsLoading] = useState(true)
     const [settingsSaving, setSettingsSaving] = useState(false)
+    const [showDeleteModal, setShowDeleteModal] = useState(false)
+    const [departmentToDelete, setDepartmentToDelete] = useState(null)
+    const [showAlert, setShowAlert] = useState(false)
+    const [alertMessage, setAlertMessage] = useState('')
+    const [alertType, setAlertType] = useState('info')
+    const [deleting, setDeleting] = useState(false)
+    const [workflowSteps, setWorkflowSteps] = useState([])
+    const [workflowStats, setWorkflowStats] = useState({
+        total_steps: 0,
+        active_steps: 0,
+        inactive_steps: 0,
+        steps_by_type: {},
+        steps_with_assignments: 0,
+        steps_without_assignments: 0
+    })
+    const [workflowLoading, setWorkflowLoading] = useState(true)
+    const [isReordering, setIsReordering] = useState(false)
+
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    )
+
+    const showAlertMessage = (message, type = 'info') => {
+        setAlertMessage(message)
+        setAlertType(type)
+        setShowAlert(true)
+    }
 
     useEffect(() => {
         fetchDepartments()
         fetchSettings()
+        fetchWorkflowData()
     }, [])
 
     const fetchSettings = async () => {
@@ -63,6 +187,70 @@ export default function Settings({ auth }) {
             console.error('Error fetching departments:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const fetchWorkflowData = async () => {
+        try {
+            setWorkflowLoading(true)
+
+            // Fetch workflow steps summary
+            const stepsResponse = await axios.get('/api/admin/workflow-steps/summary')
+            if (stepsResponse.data.success) {
+                setWorkflowSteps(stepsResponse.data.data)
+            }
+
+            // Fetch workflow statistics
+            const statsResponse = await axios.get('/api/admin/workflow-steps/stats/overview')
+            if (statsResponse.data.success) {
+                setWorkflowStats(statsResponse.data.data)
+            }
+        } catch (error) {
+            console.error('Error fetching workflow data:', error)
+            showAlertMessage('Error fetching workflow data: ' + (error.response?.data?.message || error.message), 'error')
+        } finally {
+            setWorkflowLoading(false)
+        }
+    }
+
+    const handleDragEnd = async (event) => {
+        const { active, over } = event
+
+        if (active.id !== over.id) {
+            setIsReordering(true)
+            const oldIndex = workflowSteps.findIndex(step => step.id === active.id)
+            const newIndex = workflowSteps.findIndex(step => step.id === over.id)
+
+            const newOrder = arrayMove(workflowSteps, oldIndex, newIndex)
+
+            // Update order_index for each step based on new position
+            const updatedOrder = newOrder.map((step, index) => ({
+                ...step,
+                order_index: index
+            }))
+
+            // Update local state immediately for better UX
+            setWorkflowSteps(updatedOrder)
+
+            try {
+                const stepIds = updatedOrder.map(step => step.id)
+                const response = await axios.post('/api/admin/workflow-steps/reorder', {
+                    step_ids: stepIds
+                })
+
+                if (!response.data.success) {
+                    // Revert on failure
+                    setWorkflowSteps(workflowSteps)
+                    showAlertMessage('Error reordering workflow steps', 'error')
+                }
+            } catch (error) {
+                console.error('Error reordering workflow steps:', error)
+                // Revert on error
+                setWorkflowSteps(workflowSteps)
+                showAlertMessage('Error reordering workflow steps', 'error')
+            } finally {
+                setIsReordering(false)
+            }
         }
     }
 
@@ -103,15 +291,26 @@ export default function Settings({ auth }) {
         setShowDepartmentModal(true)
     }
 
-    const handleDeleteDepartment = async (departmentId) => {
-        if (window.confirm('Are you sure you want to delete this department?')) {
-            try {
-                await axios.delete(`/api/admin/departments/${departmentId}`)
-                fetchDepartments()
-            } catch (error) {
-                console.error('Error deleting department:', error)
-                alert('Error deleting department. Please try again.')
-            }
+    const handleDeleteDepartment = (departmentId) => {
+        const department = departments.find(d => d.id === departmentId)
+        setDepartmentToDelete(department)
+        setShowDeleteModal(true)
+    }
+
+    const handleDeleteConfirm = async () => {
+        if (!departmentToDelete) return
+
+        setDeleting(true)
+        try {
+            await axios.delete(`/api/admin/departments/${departmentToDelete.id}`)
+            setShowDeleteModal(false)
+            setDepartmentToDelete(null)
+            fetchDepartments()
+        } catch (error) {
+            console.error('Error deleting department:', error)
+            showAlertMessage('Error deleting department. Please try again.', 'error')
+        } finally {
+            setDeleting(false)
         }
     }
 
@@ -144,13 +343,13 @@ export default function Settings({ auth }) {
             })
 
             if (response.data.success) {
-                alert('Settings saved successfully!')
+                // Settings saved successfully - no need to show message
             } else {
                 throw new Error(response.data.message || 'Failed to save settings')
             }
         } catch (error) {
             console.error('Error saving settings:', error)
-            alert('Error saving settings: ' + (error.response?.data?.message || error.message))
+            showAlertMessage('Error saving settings: ' + (error.response?.data?.message || error.message), 'error')
         } finally {
             setSettingsSaving(false)
         }
@@ -158,7 +357,8 @@ export default function Settings({ auth }) {
 
     const tabs = [
         { id: 'general', name: 'General Settings', icon: '⚙️' },
-        { id: 'departments', name: 'Department Management', icon: '🏢' }
+        { id: 'departments', name: 'Department Management', icon: '🏢' },
+        { id: 'workflow', name: 'Workflow Settings', icon: '🔄' }
     ]
 
     if (loading || settingsLoading) {
@@ -523,7 +723,157 @@ export default function Settings({ auth }) {
                     </div>
                 )}
 
+                {/* Workflow Settings Tab */}
+                {activeTab === 'workflow' && (
+                    <div className="p-4 lg:p-6">
+                        <h3 className="text-base lg:text-lg font-medium text-gray-900 mb-4">Workflow Management</h3>
+                        <p className="text-sm text-gray-600 mb-6">
+                            Manage approval workflow steps, their order, and assigned approvers.
+                        </p>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <div className="flex justify-between items-center mb-3">
+                                    <div>
+                                        <h4 className="text-sm font-medium text-gray-900">Current Workflow Steps</h4>
+                                        <p className="text-xs text-gray-600 mt-1">Drag and drop to reorder steps</p>
+                                    </div>
+                                    <button
+                                        onClick={fetchWorkflowData}
+                                        className="text-blue-600 hover:text-blue-800 text-xs"
+                                        disabled={workflowLoading || isReordering}
+                                    >
+                                        {workflowLoading ? 'Loading...' : isReordering ? 'Reordering...' : 'Refresh'}
+                                    </button>
+                                </div>
+
+                                {workflowLoading ? (
+                                    <div className="flex justify-center items-center py-4">
+                                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                    </div>
+                                ) : workflowSteps.length > 0 ? (
+                                    <DndContext
+                                        sensors={sensors}
+                                        collisionDetection={closestCenter}
+                                        onDragEnd={handleDragEnd}
+                                    >
+                                        <SortableContext
+                                            items={workflowSteps.map(step => step.id)}
+                                            strategy={verticalListSortingStrategy}
+                                        >
+                                            <div className="space-y-2">
+                                                {isReordering && (
+                                                    <div className="flex items-center justify-center py-2">
+                                                        <div className="flex items-center gap-2 text-blue-600">
+                                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                                            <span className="text-xs">Reordering steps...</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {workflowSteps.map((step) => (
+                                                    <SortableWorkflowStep
+                                                        key={step.id}
+                                                        step={step}
+                                                    />
+                                                ))}
+                                            </div>
+                                        </SortableContext>
+                                    </DndContext>
+                                ) : (
+                                    <div className="text-center py-4">
+                                        <p className="text-sm text-gray-500">No workflow steps configured</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="bg-white border border-gray-200 rounded-lg p-4">
+                                <h4 className="text-sm font-medium text-gray-900 mb-3">Workflow Statistics</h4>
+
+                                {workflowLoading ? (
+                                    <div className="flex justify-center items-center py-4">
+                                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="text-center p-3 bg-blue-50 rounded-lg">
+                                                <div className="text-lg font-semibold text-blue-600">{workflowStats.total_steps}</div>
+                                                <div className="text-xs text-blue-800">Total Steps</div>
+                                            </div>
+                                            <div className="text-center p-3 bg-green-50 rounded-lg">
+                                                <div className="text-lg font-semibold text-green-600">{workflowStats.active_steps}</div>
+                                                <div className="text-xs text-green-800">Active Steps</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-2">
+                                            <div className="flex justify-between text-sm">
+                                                <span className="text-gray-600">Steps with Assignments:</span>
+                                                <span className="font-medium">{workflowStats.steps_with_assignments}</span>
+                                            </div>
+                                            <div className="flex justify-between text-sm">
+                                                <span className="text-gray-600">Steps without Assignments:</span>
+                                                <span className="font-medium text-orange-600">{workflowStats.steps_without_assignments}</span>
+                                            </div>
+                                        </div>
+
+                                        {Object.keys(workflowStats.steps_by_type).length > 0 && (
+                                            <div className="pt-2 border-t border-gray-200">
+                                                <div className="text-xs font-medium text-gray-700 mb-2">Steps by Type:</div>
+                                                <div className="space-y-1">
+                                                    {Object.entries(workflowStats.steps_by_type).map(([type, count]) => (
+                                                        <div key={type} className="flex justify-between text-xs">
+                                                            <span className="text-gray-600 capitalize">{type}:</span>
+                                                            <span className="font-medium">{count}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="pt-3 border-t border-gray-200">
+                                            <Link
+                                                href="/workflow-settings"
+                                                className="block w-full text-center px-4 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors"
+                                            >
+                                                Manage Workflow Settings
+                                            </Link>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
+
+            {/* Delete Confirmation Modal */}
+            <ConfirmationModal
+                isOpen={showDeleteModal}
+                onClose={() => {
+                    setShowDeleteModal(false)
+                    setDepartmentToDelete(null)
+                }}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Department"
+                message={`Are you sure you want to delete ${departmentToDelete?.name}? This action cannot be undone.`}
+                confirmText="Delete"
+                cancelText="Cancel"
+                type="danger"
+                isLoading={deleting}
+            />
+
+            {/* Alert Modal */}
+            <AlertModal
+                isOpen={showAlert}
+                onClose={() => setShowAlert(false)}
+                title={alertType === 'success' ? 'Success' : alertType === 'error' ? 'Error' : 'Information'}
+                message={alertMessage}
+                type={alertType}
+                buttonText="OK"
+                autoClose={alertType === 'success'}
+                autoCloseDelay={3000}
+            />
         </AppLayout>
     )
 }

@@ -9,6 +9,8 @@ window.axios = axios;
 
 window.axios.defaults.headers.common['X-Requested-With'] = 'XMLHttpRequest';
 window.axios.defaults.withCredentials = true;
+window.axios.defaults.headers.common['Accept'] = 'application/json';
+window.axios.defaults.headers.common['Content-Type'] = 'application/json';
 
 // Get CSRF token from meta tag
 const token = document.head.querySelector('meta[name="csrf-token"]');
@@ -18,6 +20,38 @@ if (token) {
 } else {
     console.error('CSRF token not found: https://laravel.com/docs/csrf#csrf-x-csrf-token');
 }
+
+// Add response interceptor to handle authentication errors
+window.axios.interceptors.response.use(
+    response => response,
+    error => {
+        console.log('Axios error:', error);
+        console.log('Error response:', error.response);
+
+        if (error.response?.status === 401) {
+            // Redirect to login if unauthorized
+            window.location.href = '/login';
+        } else if (error.response?.status === 403) {
+            // Log 403 errors for debugging
+            console.error('Access denied error:', error.response.data);
+        }
+        return Promise.reject(error);
+    }
+);
+
+// Add request interceptor to log all requests
+window.axios.interceptors.request.use(
+    config => {
+        console.log('Making request to:', config.url);
+        console.log('With credentials:', config.withCredentials);
+        console.log('Headers:', config.headers);
+        return config;
+    },
+    error => {
+        console.error('Request error:', error);
+        return Promise.reject(error);
+    }
+);
 
 // Add route helper (simple version)
 window.route = (name, params = {}) => {

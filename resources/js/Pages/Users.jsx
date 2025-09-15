@@ -2,6 +2,7 @@ import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import AlertModal from '../Components/AlertModal'
 
 export default function Users({ auth }) {
     const [users, setUsers] = useState([])
@@ -21,6 +22,13 @@ export default function Users({ auth }) {
     })
     const [errors, setErrors] = useState({})
     const [submitting, setSubmitting] = useState(false)
+    const [showDeleteModal, setShowDeleteModal] = useState(false)
+    const [userToDelete, setUserToDelete] = useState(null)
+    const [showAlert, setShowAlert] = useState(false)
+    const [alertMessage, setAlertMessage] = useState('')
+    const [alertType, setAlertType] = useState('info')
+    const [deleting, setDeleting] = useState(false)
+
 
     // Fixed roles - no need to fetch from API
     const fixedRoles = [
@@ -105,16 +113,37 @@ export default function Users({ auth }) {
         setShowModal(true)
     }
 
-    const handleDelete = async (userId) => {
-        if (window.confirm('Are you sure you want to delete this user?')) {
-            try {
-                await axios.delete(`/api/admin/users/${userId}`)
-                fetchUsers()
-            } catch (error) {
-                console.error('Error deleting user:', error)
-                alert('Error deleting user. Please try again.')
-            }
+    const handleDeleteClick = (userId) => {
+        const user = users.find(u => u.id === userId)
+        setUserToDelete(user)
+        setShowDeleteModal(true)
+    }
+
+    const handleDeleteClose = () => {
+        setShowDeleteModal(false)
+        setUserToDelete(null)
+        setDeleting(false)
+    }
+
+    const handleDeleteConfirm = async () => {
+        if (!userToDelete) return
+
+        setDeleting(true)
+        try {
+            await axios.delete(`/api/admin/users/${userToDelete.id}`)
+            handleDeleteClose()
+            fetchUsers()
+        } catch (error) {
+            console.error('Error deleting user:', error)
+            showAlertMessage('Error deleting user. Please try again.', 'error')
+            setDeleting(false)
         }
+    }
+
+    const showAlertMessage = (message, type = 'info') => {
+        setAlertMessage(message)
+        setAlertType(type)
+        setShowAlert(true)
     }
 
 
@@ -260,17 +289,25 @@ export default function Users({ auth }) {
                                         </span>
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <div className="flex space-x-2">
+                                        <div className="flex items-center space-x-2">
                                             <button
                                                 onClick={() => handleEdit(user)}
-                                                className="text-blue-600 hover:text-blue-900"
+                                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                                                title="Edit user"
                                             >
+                                                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                </svg>
                                                 Edit
                                             </button>
                                             <button
-                                                onClick={() => handleDelete(user.id)}
-                                                className="text-red-600 hover:text-red-900"
+                                                onClick={() => handleDeleteClick(user.id)}
+                                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+                                                title="Delete user"
                                             >
+                                                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                </svg>
                                                 Delete
                                             </button>
                                         </div>
@@ -312,14 +349,22 @@ export default function Users({ auth }) {
                                 <div className="flex space-x-2">
                                     <button
                                         onClick={() => handleEdit(user)}
-                                        className="flex-1 bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center"
+                                        className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                                        title="Edit user"
                                     >
+                                        <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                        </svg>
                                         Edit
                                     </button>
                                     <button
-                                        onClick={() => handleDelete(user.id)}
-                                        className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-900 px-3 py-2 rounded-md text-xs font-medium text-center"
+                                        onClick={() => handleDeleteClick(user.id)}
+                                        className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+                                        title="Delete user"
                                     >
+                                        <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
                                         Delete
                                     </button>
                                 </div>
@@ -447,7 +492,68 @@ export default function Users({ auth }) {
                         </div>
                     </div>
                 )}
+
             </div>
+
+            {/* Delete Confirmation Modal */}
+            {showDeleteModal && (
+                <div
+                    className="fixed inset-0 modal-backdrop-danger overflow-y-auto h-full w-full z-50 flex items-center justify-center p-4"
+                    onClick={handleDeleteClose}
+                >
+                    <div
+                        className="relative w-full max-w-md bg-white rounded-lg shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="p-6">
+                            <div className="flex items-center mb-4">
+                                <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100">
+                                    <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                                    </svg>
+                                </div>
+                            </div>
+                            <h3 className="text-lg font-medium text-gray-900 text-center mb-4">
+                                Delete User
+                            </h3>
+                            <p className="text-sm text-gray-500 text-center mb-6">
+                                Are you sure you want to delete <strong>{userToDelete?.full_name}</strong>? This action cannot be undone.
+                            </p>
+                            <div className="flex justify-end space-x-3">
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteClose}
+                                    disabled={deleting}
+                                    className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteConfirm}
+                                    disabled={deleting}
+                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium disabled:opacity-50"
+                                >
+                                    {deleting ? 'Deleting...' : 'Delete'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+
+            {/* Alert Modal */}
+            <AlertModal
+                isOpen={showAlert}
+                onClose={() => setShowAlert(false)}
+                title={alertType === 'success' ? 'Success' : alertType === 'error' ? 'Error' : 'Information'}
+                message={alertMessage}
+                type={alertType}
+                buttonText="OK"
+                autoClose={alertType === 'success'}
+                autoCloseDelay={3000}
+            />
         </AppLayout>
     )
 }

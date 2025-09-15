@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Admin\ApprovalRuleController;
 use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Admin\SystemSettingsController;
+use App\Http\Controllers\Api\WorkflowStepController;
 use App\Http\Controllers\ReportsController;
 
 /*
@@ -47,12 +48,26 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/requests/pending/approvals', [RequestController::class, 'pendingApprovals']);
     Route::get('/requests/pending/procurement', [RequestController::class, 'pendingProcurement']);
 
+    // Procurement verification
+    Route::get('/requests/pending/verification', [RequestController::class, 'pendingProcurementVerification']);
+    Route::post('/requests/{id}/verify', [RequestController::class, 'processProcurementVerification']);
+
     // Notification routes
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
+
+    // Debug routes
+    Route::get('/test-session', function () {
+        return response()->json([
+            'success' => Auth::check(),
+            'authenticated' => Auth::check(),
+            'user' => Auth::user() ? Auth::user()->load('role') : null,
+            'session_id' => request()->session()->getId()
+        ]);
+    });
 });
 
 // Admin routes
@@ -93,6 +108,18 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     Route::put('/settings', [SystemSettingsController::class, 'update']);
     Route::put('/settings/{key}', [SystemSettingsController::class, 'updateSetting']);
     Route::post('/settings/reset', [SystemSettingsController::class, 'reset']);
+
+    // Workflow steps management
+    Route::get('/workflow-steps', [WorkflowStepController::class, 'index']);
+    Route::post('/workflow-steps', [WorkflowStepController::class, 'store']);
+    Route::get('/workflow-steps/stats/overview', [WorkflowStepController::class, 'getStats']);
+    Route::get('/workflow-steps/summary', [WorkflowStepController::class, 'getSummary']);
+    Route::get('/workflow-steps/assignable-entities', [WorkflowStepController::class, 'getAssignableEntities']);
+    Route::post('/workflow-steps/reorder', [WorkflowStepController::class, 'reorder']);
+    Route::get('/workflow-steps/{id}', [WorkflowStepController::class, 'show']);
+    Route::put('/workflow-steps/{id}', [WorkflowStepController::class, 'update']);
+    Route::delete('/workflow-steps/{id}', [WorkflowStepController::class, 'destroy']);
+    Route::post('/workflow-steps/{id}/duplicate', [WorkflowStepController::class, 'duplicate']);
 });
 
 // Reporting routes

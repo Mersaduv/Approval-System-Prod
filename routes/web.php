@@ -106,8 +106,39 @@ Route::middleware('auth')->group(function () {
             ]
         ]);
     });
+    Route::get('/workflow-settings', function () {
+        return inertia('WorkflowSettings', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
     Route::get('/procurement', function () {
         return inertia('Procurement', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+    Route::get('/procurement/verification', function () {
+        return inertia('ProcurementVerification', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+
+    // Debug routes
+    Route::get('/debug-auth', function () {
+        return inertia('DebugAuth', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+
+    Route::get('/session-test', function () {
+        return inertia('SessionTest', [
             'auth' => [
                 'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]

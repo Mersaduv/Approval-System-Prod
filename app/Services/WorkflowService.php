@@ -6,6 +6,8 @@ use App\Models\Request as RequestModel;
 use App\Models\User;
 use App\Models\Role;
 use App\Models\ApprovalRule;
+use App\Models\WorkflowStep;
+use App\Models\WorkflowStepAssignment;
 use App\Models\Notification;
 use App\Models\AuditLog;
 use App\Models\Procurement;
@@ -39,34 +41,413 @@ class WorkflowService
                 'item' => $requestData['item'],
                 'description' => $requestData['description'],
                 'amount' => $requestData['amount'],
-                'status' => 'Pending'
+                'status' => 'Pending',
+                'procurement_status' => 'Pending Verification'
             ]);
 
             // Log the submission
-            $this->logAction($employeeId, $request->id, 'Submitted', 'Request submitted for approval');
+            $this->logAction($employeeId, $request->id, 'Submitted', 'Request submitted for procurement verification');
 
-            // Start the approval workflow
-            $this->processApprovalWorkflow($request);
+            // Start the procurement verification workflow
+            $this->processProcurementVerificationWorkflow($request);
 
             return $request;
         });
     }
 
     /**
-     * Process the approval workflow based on rules
+     * Process procurement verification workflow
+     */
+    public function processProcurementVerificationWorkflow(RequestModel $request): void
+    {
+        // Update request status to show it's waiting for procurement verification
+        $request->update(['status' => 'Pending Procurement Verification']);
+
+        // Send notification to procurement team for verification
+        $this->notificationService->sendProcurementVerificationRequest($request);
+
+        // Log the action
+        $this->logAction(1, $request->id, 'Sent for Procurement Verification', 'Request sent to procurement team for market verification and pricing');
+    }
+
+    /**
+     * Process procurement verification
+     */
+    public function processProcurementVerification(int $requestId, int $procurementUserId, string $status, float $finalPrice = null, string $notes = null): bool
+    {
+        return DB::transaction(function () use ($requestId, $procurementUserId, $status, $finalPrice, $notes) {
+            $request = RequestModel::findOrFail($requestId);
+            $procurementUser = User::findOrFail($procurementUserId);
+
+            // Check if user has procurement role
+            if (!$procurementUser->isProcurement()) {
+                throw new \Exception('Only procurement team members can verify requests');
+            }
+
+            // Check if request is in correct status for verification
+            if ($request->procurement_status !== 'Pending Verification') {
+                throw new \Exception('Request is not in a valid status for procurement verification');
+            }
+
+            // Update procurement verification status
+            $request->update([
+                'procurement_status' => $status,
+                'final_price' => $finalPrice,
+                'procurement_notes' => $notes,
+                'verified_by' => $procurementUserId,
+                'verified_at' => now()
+            ]);
+
+            // Log the verification action
+            $this->logAction($procurementUserId, $requestId, 'Procurement Verified', "Status: {$status}" . ($notes ? " - {$notes}" : ""));
+
+            // If verified, proceed to approval workflow
+            if ($status === 'Verified') {
+                // Update the request amount with final price if provided
+                if ($finalPrice && $finalPrice > 0) {
+                    $request->update(['amount' => $finalPrice]);
+                }
+
+                // Start the approval workflow
+                $this->processApprovalWorkflow($request);
+
+                // Notify employee that request is verified and sent for approval
+                $this->notificationService->sendEmployeeNotification($request, 'procurement_verified');
+            } elseif ($status === 'Not Available' || $status === 'Rejected') {
+                // Update request status to rejected
+                $request->update(['status' => 'Rejected']);
+
+                // Notify employee that request was rejected by procurement
+                $this->notificationService->sendEmployeeNotification($request, 'procurement_rejected', $notes);
+            }
+
+            return true;
+        });
+    }
+
+    /**
+     * Process the approval workflow based on dynamic workflow steps
      */
     public function processApprovalWorkflow(RequestModel $request): void
+    {
+        // Get applicable workflow steps for this request
+        $steps = WorkflowStep::getStepsForRequest($request);
+
+        if ($steps->isEmpty()) {
+            // Fallback to legacy system if no dynamic steps are configured
+            $this->processLegacyWorkflow($request);
+            return;
+        }
+
+        // Process the first applicable step
+        $this->processNextWorkflowStep($request, $steps);
+    }
+
+    /**
+     * Process next workflow step
+     */
+    private function processNextWorkflowStep(RequestModel $request, $steps): void
+    {
+        $processed = false;
+
+        foreach ($steps as $step) {
+            if ($this->shouldProcessStep($request, $step)) {
+                $this->executeWorkflowStep($request, $step);
+                $processed = true;
+                break; // Only process one step at a time
+            }
+        }
+
+        // If no step was processed, check if all approvals are complete
+        if (!$processed && $this->allApprovalsComplete($request)) {
+            $request->update(['status' => 'Approved']);
+            $this->logAction(1, $request->id, 'All Approvals Complete', 'All required approvals have been completed');
+        }
+    }
+
+    /**
+     * Check if a step should be processed
+     */
+    private function shouldProcessStep(RequestModel $request, WorkflowStep $step): bool
+    {
+        // Check if step is active
+        if (!$step->is_active) {
+            return false;
+        }
+
+        // Check if step conditions are met
+        if (!WorkflowStep::shouldExecuteStep($step, $request)) {
+            return false;
+        }
+
+        // Check if step has already been completed
+        if ($this->isStepCompleted($request, $step)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Execute a workflow step
+     */
+    private function executeWorkflowStep(RequestModel $request, WorkflowStep $step): void
+    {
+        switch ($step->step_type) {
+            case 'approval':
+                $this->executeApprovalStep($request, $step);
+                break;
+            case 'verification':
+                $this->executeVerificationStep($request, $step);
+                break;
+            case 'notification':
+                $this->executeNotificationStep($request, $step);
+                break;
+        }
+    }
+
+    /**
+     * Execute approval step
+     */
+    private function executeApprovalStep(RequestModel $request, WorkflowStep $step): void
+    {
+        // Check for auto-approval
+        if ($step->auto_approve_if_condition_met) {
+            $this->autoApproveRequest($request);
+            return;
+        }
+
+        // Get assigned approvers
+        $approvers = $step->getAssignedUsers();
+
+        if ($approvers->isEmpty()) {
+            Log::warning("No approvers assigned to workflow step: {$step->name}");
+            return;
+        }
+
+        // Send approval request to the first approver
+        $approver = $approvers->first();
+        $this->sendApprovalRequest($request, $approver, "Approval required: {$step->name}");
+
+        // Update request status to indicate it's waiting for this specific step
+        $request->update(['status' => 'Pending Approval']);
+    }
+
+    /**
+     * Execute verification step
+     */
+    private function executeVerificationStep(RequestModel $request, WorkflowStep $step): void
+    {
+        // This is typically handled by the procurement verification system
+        // Just update the request status
+        $request->update(['status' => 'Pending Procurement Verification']);
+
+        // Log the action
+        $this->logAction(1, $request->id, 'Verification Required', "Verification step: {$step->name}");
+    }
+
+    /**
+     * Execute notification step
+     */
+    private function executeNotificationStep(RequestModel $request, WorkflowStep $step): void
+    {
+        // Send notifications to assigned users
+        $users = $step->getAssignedUsers();
+
+        foreach ($users as $user) {
+            $this->notificationService->sendEmployeeNotification($request, 'notification', null, $user);
+        }
+
+        // Mark step as completed and move to next
+        $this->markStepCompleted($request, $step);
+        $this->processNextWorkflowStep($request, WorkflowStep::getStepsForRequest($request));
+    }
+
+    /**
+     * Get current step for approver
+     */
+    private function getCurrentStepForApprover(RequestModel $request, User $approver): ?WorkflowStep
+    {
+        $steps = WorkflowStep::getStepsForRequest($request);
+
+        // Find the first incomplete step for this approver
+        foreach ($steps as $step) {
+            if ($this->isStepForUser($step, $approver) && !$this->isStepCompleted($request, $step)) {
+                return $step;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Get approver ID from assignment
+     */
+    private function getApproverIdFromAssignment(WorkflowStepAssignment $assignment): ?int
+    {
+        switch ($assignment->assignable_type) {
+            case 'App\\Models\\User':
+                return $assignment->assignable_id;
+            case 'App\\Models\\Role':
+                // Get first user with this role
+                $user = User::where('role_id', $assignment->assignable_id)->first();
+                return $user ? $user->id : null;
+            case 'App\\Models\\Department':
+                // Get first user from this department
+                $user = User::where('department_id', $assignment->assignable_id)->first();
+                return $user ? $user->id : null;
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Check if a step is completed
+     */
+    private function isStepCompleted(RequestModel $request, WorkflowStep $step): bool
+    {
+        // Check for step completion in audit logs - this is the most reliable method
+        $stepCompleted = AuditLog::where('request_id', $request->id)
+            ->where('action', 'Step completed')
+            ->where('notes', 'like', '%' . $step->name . '%')
+            ->where('notes', 'like', '%Step ID: ' . $step->id . '%')
+            ->exists();
+
+        if ($stepCompleted) {
+            return true;
+        }
+
+        // For approval steps, check if there's a specific approval for this step
+        if ($step->step_type === 'approval') {
+            // Check if there's an approval with this specific step name and ID
+            $stepApproved = AuditLog::where('request_id', $request->id)
+                ->where('action', 'Approved')
+                ->where('notes', 'like', '%Step: ' . $step->name . '%')
+                ->where('notes', 'like', '%Step ID: ' . $step->id . '%')
+                ->exists();
+
+            if ($stepApproved) {
+                return true;
+            }
+        }
+
+        // For verification steps, check if procurement verification is completed
+        if ($step->step_type === 'verification') {
+            return $request->procurement_status === 'Verified';
+        }
+
+        return false;
+    }
+
+    /**
+     * Mark step as completed
+     */
+    private function markStepCompleted(RequestModel $request, WorkflowStep $step): void
+    {
+        $this->logAction(1, $request->id, 'Step completed', "Step completed: {$step->name}");
+    }
+
+
+    /**
+     * Mark current step as completed based on approver
+     */
+    private function markCurrentStepCompleted(RequestModel $request, int $approverId, $currentStep = null): void
+    {
+        $approver = User::findOrFail($approverId);
+
+        // Use the provided step or get the current step that was actually approved
+        if (!$currentStep) {
+            $currentStep = $this->getCurrentStepForApprover($request, $approver);
+        }
+
+        if ($currentStep) {
+            // Mark this specific step as completed with unique identifier
+            $this->logAction($approverId, $request->id, 'Step completed', "Step completed: {$currentStep->name} by {$approver->full_name} (Step ID: {$currentStep->id})");
+        }
+    }
+
+    /**
+     * Check if step is assigned to user
+     */
+    private function isStepForUser(WorkflowStep $step, User $user): bool
+    {
+        $assignments = $step->assignments;
+
+        foreach ($assignments as $assignment) {
+            if ($this->isUserAssignedToStep($assignment, $user)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if user is assigned to a specific step assignment
+     */
+    private function isUserAssignedToStep($assignment, User $user): bool
+    {
+        switch ($assignment->assignable_type) {
+            case 'App\\Models\\User':
+                return $assignment->assignable_id == $user->id;
+            case 'App\\Models\\Role':
+                return $assignment->assignable_id == $user->role_id;
+            case 'App\\Models\\Department':
+                return $assignment->assignable_id == $user->department_id;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * Mark current step as rejected based on rejector
+     */
+    private function markCurrentStepRejected(RequestModel $request, int $rejectorId): void
+    {
+        $rejector = User::findOrFail($rejectorId);
+        $steps = WorkflowStep::getStepsForRequest($request);
+
+        foreach ($steps as $step) {
+            if ($this->isStepForUser($step, $rejector) && !$this->isStepCompleted($request, $step)) {
+                $this->logAction($rejectorId, $request->id, 'Step Rejected', "Step rejected: {$step->name}");
+                break; // Only mark one step as rejected per rejection
+            }
+        }
+    }
+
+    /**
+     * Get action name for step
+     */
+    private function getStepActionName(WorkflowStep $step): string
+    {
+        switch ($step->step_type) {
+            case 'approval':
+                return 'Approved';
+            case 'verification':
+                return 'Verified';
+            case 'notification':
+                return 'Notified';
+            default:
+                return 'Processed';
+        }
+    }
+
+    /**
+     * Fallback to legacy workflow system
+     */
+    private function processLegacyWorkflow(RequestModel $request): void
     {
         $employee = $request->employee;
         $department = $employee->department;
         $amount = $request->amount;
 
-        // Special handling for procurement users - they need CEO/Admin approval
-        if ($employee->isProcurement()) {
-            $this->processProcurementWorkflow($request);
+        // Check if this is an employee request - they go directly to CEO/Admin after procurement verification
+        if ($employee->isEmployee()) {
+            $this->processEmployeeWorkflow($request);
             return;
         }
 
+        // For other roles (Manager, Procurement, Admin), use normal workflow
         // Get approval rules for this department
         $rules = ApprovalRule::where('department_id', $department->id)
             ->where('min_amount', '<=', $amount)
@@ -80,6 +461,30 @@ class WorkflowService
         } else {
             // Process based on dynamic rules
             $this->processDynamicWorkflow($request, $rules);
+        }
+    }
+
+    /**
+     * Process workflow for employee requests - goes directly to CEO/Admin after procurement verification
+     */
+    private function processEmployeeWorkflow(RequestModel $request): void
+    {
+        $amount = $request->amount;
+
+        // Get thresholds from settings
+        $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
+
+        // Auto-approval: amount <= auto_approval_threshold
+        if ($amount <= $autoApprovalThreshold) {
+            // Auto-approve the request
+            $this->autoApproveRequest($request);
+            return;
+        }
+
+        // For amounts above threshold, send directly to CEO/Admin
+        $admin = $this->getAdmin();
+        if ($admin) {
+            $this->sendApprovalRequest($request, $admin, 'CEO/Admin approval required for employee request');
         }
     }
 
@@ -147,29 +552,6 @@ class WorkflowService
         }
     }
 
-    /**
-     * Process workflow for procurement users - requires Admin/CEO approval
-     */
-    private function processProcurementWorkflow(RequestModel $request): void
-    {
-        $amount = $request->amount;
-
-        // Get thresholds from settings
-        $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
-
-        // Auto-approval: amount <= auto_approval_threshold
-        if ($amount <= $autoApprovalThreshold) {
-            // Auto-approve the request
-            $this->autoApproveRequest($request);
-            return;
-        }
-
-        // For procurement users, all requests above auto-approval threshold need Admin/CEO approval
-        $admin = $this->getAdmin();
-        if ($admin) {
-            $this->sendApprovalRequest($request, $admin, 'Admin/CEO approval required for procurement request');
-        }
-    }
 
     /**
      * Approve a request
@@ -185,8 +567,16 @@ class WorkflowService
                 throw new \Exception('You are not authorized to approve this request');
             }
 
-            // Log the approval
-            $this->logAction($approverId, $requestId, 'Approved', $notes);
+            // Get the current step for this approver
+            $currentStep = $this->getCurrentStepForApprover($request, $approver);
+            $stepName = $currentStep ? $currentStep->name : 'Unknown Step';
+            $stepId = $currentStep ? $currentStep->id : 'Unknown';
+
+            // Log the approval with step information
+            $this->logAction($approverId, $requestId, 'Approved', $notes ? "{$notes} (Step: {$stepName}, Step ID: {$stepId})" : "Approved (Step: {$stepName}, Step ID: {$stepId})");
+
+            // Mark current step as completed
+            $this->markCurrentStepCompleted($request, $approverId, $currentStep);
 
             // Check if all required approvals are complete
             if ($this->allApprovalsComplete($request)) {
@@ -218,6 +608,9 @@ class WorkflowService
 
             // Log the rejection
             $this->logAction($rejectorId, $requestId, 'Rejected', $reason);
+
+            // Mark current step as rejected
+            $this->markCurrentStepRejected($request, $rejectorId);
 
             // Notify the employee
             $this->notificationService->sendEmployeeNotification($request, 'rejected', $reason);
@@ -391,23 +784,32 @@ class WorkflowService
      */
     private function allApprovalsComplete(RequestModel $request): bool
     {
+        // Get applicable workflow steps for this request
+        $steps = WorkflowStep::getStepsForRequest($request);
+
+        if ($steps->isEmpty()) {
+            // Fallback to legacy system
+            return $this->allLegacyApprovalsComplete($request);
+        }
+
+        // Check if all required steps are completed
+        foreach ($steps as $step) {
+            if ($step->is_required && !$this->isStepCompleted($request, $step)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Legacy approval completion check
+     */
+    private function allLegacyApprovalsComplete(RequestModel $request): bool
+    {
         $employee = $request->employee;
         $amount = $request->amount;
         $department = $employee->department;
-
-        // Special handling for procurement users - check if Admin approval is complete
-        if ($employee->isProcurement()) {
-            $amount = $request->amount;
-            $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
-
-            // Auto-approval: no additional approvals needed
-            if ($amount <= $autoApprovalThreshold) {
-                return true;
-            }
-
-            // For amounts above threshold, check if Admin approval exists
-            return $this->hasAdminApproval($request);
-        }
 
         // Get thresholds from settings
         $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
@@ -415,6 +817,11 @@ class WorkflowService
         // Auto-approval: no additional approvals needed
         if ($amount <= $autoApprovalThreshold) {
             return true;
+        }
+
+        // Special handling for employee requests - only need CEO/Admin approval
+        if ($employee->isEmployee()) {
+            return $this->hasAdminApproval($request);
         }
 
         // Check if we're using dynamic rules
@@ -480,20 +887,37 @@ class WorkflowService
      */
     private function processNextApproval(RequestModel $request): void
     {
+        // Get applicable workflow steps for this request
+        $steps = WorkflowStep::getStepsForRequest($request);
+
+        if ($steps->isEmpty()) {
+            // Fallback to legacy system
+            $this->processLegacyNextApproval($request);
+            return;
+        }
+
+        // Process the next applicable step
+        $this->processNextWorkflowStep($request, $steps);
+    }
+
+    /**
+     * Legacy next approval processing
+     */
+    private function processLegacyNextApproval(RequestModel $request): void
+    {
         $employee = $request->employee;
         $amount = $request->amount;
         $department = $employee->department;
 
-        // Special handling for procurement users - check if Admin approval is needed
-        if ($employee->isProcurement()) {
-            $amount = $request->amount;
+        // Special handling for employee requests - only need CEO/Admin approval
+        if ($employee->isEmployee()) {
             $autoApprovalThreshold = SystemSetting::get('auto_approval_threshold', 1000);
 
             // For amounts above threshold, check if Admin approval is needed
             if ($amount > $autoApprovalThreshold && !$this->hasAdminApproval($request)) {
                 $admin = $this->getAdmin();
                 if ($admin) {
-                    $this->sendApprovalRequest($request, $admin, 'Admin/CEO approval required for procurement request');
+                    $this->sendApprovalRequest($request, $admin, 'CEO/Admin approval required for employee request');
                 }
             }
             return;
@@ -576,6 +1000,13 @@ class WorkflowService
      */
     private function sendApprovalRequest(RequestModel $request, User $approver, string $message): void
     {
+        // Update request status to pending approval
+        $request->update(['status' => 'Pending Approval']);
+
+        // Log the approval request
+        $this->logAction($approver->id, $request->id, 'Approval Request Sent', $message);
+
+        // Send notification
         $this->notificationService->sendApprovalRequest($request, $approver, $message);
     }
 
@@ -647,10 +1078,59 @@ class WorkflowService
         if ($approver->isAdmin()) {
             return true;
         } elseif ($approver->isManager()) {
-            return $approver->department_id === $employee->department_id;
+            // Check if approver is from the same department as the employee
+            if ($approver->department_id === $employee->department_id) {
+                return true;
+            }
+
+            // Check if approver is assigned to this request in workflow steps
+            return $this->isUserAssignedToRequest($request, $approver);
+        } elseif ($approver->isProcurement()) {
+            // Check if approver is assigned to this request in workflow steps
+            return $this->isUserAssignedToRequest($request, $approver);
         }
 
         return false;
+    }
+
+    /**
+     * Check if user is assigned to this request in workflow steps
+     */
+    private function isUserAssignedToRequest(RequestModel $request, User $user): bool
+    {
+        // Check if user is personally assigned to any workflow step
+        $personalAssignment = WorkflowStepAssignment::where('assignable_type', 'App\\Models\\User')
+            ->where('assignable_id', $user->id)
+            ->whereHas('workflowStep', function($query) {
+                $query->where('is_active', true);
+            })
+            ->exists();
+
+        if ($personalAssignment) {
+            return true;
+        }
+
+        // Check if user's department is assigned to any workflow step
+        $departmentAssignment = WorkflowStepAssignment::where('assignable_type', 'App\\Models\\Department')
+            ->where('assignable_id', $user->department_id)
+            ->whereHas('workflowStep', function($query) {
+                $query->where('is_active', true);
+            })
+            ->exists();
+
+        if ($departmentAssignment) {
+            return true;
+        }
+
+        // Check if user's role is assigned to any workflow step
+        $roleAssignment = WorkflowStepAssignment::where('assignable_type', 'App\\Models\\Role')
+            ->where('assignable_id', $user->role_id)
+            ->whereHas('workflowStep', function($query) {
+                $query->where('is_active', true);
+            })
+            ->exists();
+
+        return $roleAssignment;
     }
 
     private function isPurchaseRelated(RequestModel $request): bool
