@@ -52,7 +52,32 @@ export default function Dashboard({ auth }) {
         }, 1000)
     }, [])
 
-    const getStatusColor = (status) => {
+    const isRequestDelayed = (request) => {
+        if (!request || !request.audit_logs) return false;
+
+        // Check if there's a "Delayed" action in audit logs
+        const hasDelayedAction = request.audit_logs.some(log => log.action === "Delayed");
+
+        if (!hasDelayedAction) return false;
+
+        // Check if Finance Approval step has been completed after the delay
+        // If Finance Approval step is approved, rejected, or completed, the request is no longer delayed
+        const financeApprovalCompleted = request.audit_logs.some(log =>
+            (log.action === "Step completed" || log.action === "Approved" || log.action === "Rejected") &&
+            log.notes &&
+            log.notes.includes("Finance Approval")
+        );
+
+        // If Finance Approval step is completed, the request is no longer delayed
+        return !financeApprovalCompleted;
+    };
+
+    const getStatusColor = (status, request = null) => {
+        // Check if request is delayed
+        if (request && isRequestDelayed(request)) {
+            return 'bg-orange-100 text-orange-800';
+        }
+
         switch (status.toLowerCase()) {
             case 'pending': return 'bg-yellow-100 text-yellow-800'
             case 'pending procurement verification': return 'bg-orange-100 text-orange-800'
@@ -64,6 +89,22 @@ export default function Dashboard({ auth }) {
             case 'cancelled': return 'bg-gray-100 text-gray-800'
             default: return 'bg-gray-100 text-gray-800'
         }
+    }
+
+    const getStatusDisplayText = (status, request = null) => {
+        // Check if request is delayed
+        if (request && isRequestDelayed(request)) {
+            return "Delayed (Waiting for finance Approval)";
+        }
+
+        if (status === "Pending Procurement Verification") {
+            return "Pending Procurement";
+        }
+        // If status is Approved but no procurement record exists, show as Pending Procurement
+        if (status === "Approved" && request && !request.procurement) {
+            return "Pending Procurement";
+        }
+        return status;
     }
 
     if (loading) {
@@ -311,8 +352,8 @@ export default function Dashboard({ auth }) {
                                             </p>
                                         </div>
                                         <div className="flex items-center space-x-2">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
-                                                {request.status}
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
+                                                {getStatusDisplayText(request.status, request)}
                                             </span>
                                         </div>
                                     </div>

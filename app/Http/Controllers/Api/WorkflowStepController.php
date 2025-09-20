@@ -8,6 +8,7 @@ use App\Models\WorkflowStepAssignment;
 use App\Models\User;
 use App\Models\Role;
 use App\Models\Department;
+use App\Models\FinanceAssignment;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
@@ -24,6 +25,30 @@ class WorkflowStepController extends Controller
         $steps = WorkflowStep::with(['assignments.assignable'])
             ->orderBy('order_index')
             ->get();
+
+        // Map assignments to include assignment_type and user_id
+        $steps->each(function ($step) {
+            $step->assignments = $step->assignments->map(function ($assignment) {
+                $assignmentType = $this->getAssignmentTypeFromAssignable($assignment);
+                $userId = in_array($assignmentType, ['user', 'finance']) ? $this->getUserIdFromAssignment($assignment) : null;
+                $assignableName = $this->getAssignableName($assignment);
+
+                return [
+                    'id' => $assignment->id,
+                    'workflow_step_id' => $assignment->workflow_step_id,
+                    'assignable_type' => $assignment->assignable_type,
+                    'assignable_id' => $assignment->assignable_id,
+                    'assignment_type' => $assignmentType,
+                    'user_id' => $userId,
+                    'is_required' => $assignment->is_required,
+                    'conditions' => $assignment->conditions,
+                    'created_at' => $assignment->created_at,
+                    'updated_at' => $assignment->updated_at,
+                    'assignable' => $assignment->assignable,
+                    'assignable_name' => $assignableName
+                ];
+            });
+        });
 
         return response()->json([
             'success' => true,
@@ -43,10 +68,20 @@ class WorkflowStepController extends Controller
             'is_active' => 'boolean',
             'step_type' => 'required|in:approval,verification,notification',
             'timeout_hours' => 'nullable|integer|min:1',
-            'auto_approve_if_condition_met' => 'boolean',
+            'auto_approve' => 'boolean',
             'conditions' => 'nullable|array',
-            'assignments' => 'nullable|array'
+            'assignments' => 'array',
+            'assignments.*.assignment_type' => 'required|string|in:admin,manager,finance,procurement,user',
+            'assignments.*.user_id' => 'required_if:assignments.*.assignment_type,user,finance|nullable|integer|exists:users,id',
+            'assignments.*.is_required' => 'boolean'
         ]);
+
+        // Custom validation for assignments when auto_approve is false
+        $validator->after(function ($validator) use ($request) {
+            if (!$request->auto_approve && (!$request->assignments || count($request->assignments) === 0)) {
+                $validator->errors()->add('assignments', 'At least one assignment is required when auto approve is disabled.');
+            }
+        });
 
         if ($validator->fails()) {
             return response()->json([
@@ -61,23 +96,22 @@ class WorkflowStepController extends Controller
 
             $stepData = $request->only([
                 'name', 'description', 'order_index', 'is_active',
-                'step_type', 'timeout_hours', 'auto_approve_if_condition_met', 'conditions'
+                'step_type', 'timeout_hours', 'auto_approve', 'conditions'
             ]);
             $stepData['is_required'] = true; // All steps are required by default
 
             $step = WorkflowStep::create($stepData);
 
-            if ($request->has('assignments')) {
+            if ($request->has('assignments') && !$request->auto_approve) {
                 foreach ($request->assignments as $assignmentData) {
                     $assignableType = $this->getAssignableType($assignmentData['assignment_type']);
-                    $assignableId = $this->getAssignableId($assignmentData);
+                    $assignableId = $this->getAssignableId($assignmentData, $assignableType);
 
                     WorkflowStepAssignment::create([
                         'workflow_step_id' => $step->id,
                         'assignable_type' => $assignableType,
                         'assignable_id' => $assignableId,
                         'is_required' => $assignmentData['is_required'] ?? true,
-                        'priority' => $assignmentData['priority'] ?? 1,
                         'conditions' => $assignmentData['conditions'] ?? null
                     ]);
                 }
@@ -115,10 +149,20 @@ class WorkflowStepController extends Controller
             'is_active' => 'boolean',
             'step_type' => 'sometimes|required|in:approval,verification,notification',
             'timeout_hours' => 'nullable|integer|min:1',
-            'auto_approve_if_condition_met' => 'boolean',
+            'auto_approve' => 'boolean',
             'conditions' => 'nullable|array',
-            'assignments' => 'nullable|array'
+            'assignments' => 'sometimes|array',
+            'assignments.*.assignment_type' => 'required|string|in:admin,manager,finance,procurement,user',
+            'assignments.*.user_id' => 'required_if:assignments.*.assignment_type,user,finance|nullable|integer|exists:users,id',
+            'assignments.*.is_required' => 'boolean'
         ]);
+
+        // Custom validation for assignments when auto_approve is false
+        $validator->after(function ($validator) use ($request) {
+            if (!$request->auto_approve && $request->has('assignments') && (!$request->assignments || count($request->assignments) === 0)) {
+                $validator->errors()->add('assignments', 'At least one assignment is required when auto approve is disabled.');
+            }
+        });
 
         if ($validator->fails()) {
             return response()->json([
@@ -133,13 +177,13 @@ class WorkflowStepController extends Controller
 
             $stepData = $request->only([
                 'name', 'description', 'order_index', 'is_active',
-                'step_type', 'timeout_hours', 'auto_approve_if_condition_met', 'conditions'
+                'step_type', 'timeout_hours', 'auto_approve', 'conditions'
             ]);
             $stepData['is_required'] = true; // All steps are required by default
 
             $step->update($stepData);
 
-            if ($request->has('assignments')) {
+            if ($request->has('assignments') && !$request->auto_approve) {
                 $existingIds = collect($request->assignments)
                     ->pluck('id')
                     ->filter()
@@ -149,7 +193,7 @@ class WorkflowStepController extends Controller
 
                 foreach ($request->assignments as $assignmentData) {
                     $assignableType = $this->getAssignableType($assignmentData['assignment_type']);
-                    $assignableId = $this->getAssignableId($assignmentData);
+                    $assignableId = $this->getAssignableId($assignmentData, $assignableType);
 
                     if (isset($assignmentData['id'])) {
                         $assignment = WorkflowStepAssignment::find($assignmentData['id']);
@@ -158,7 +202,6 @@ class WorkflowStepController extends Controller
                                 'assignable_type' => $assignableType,
                                 'assignable_id' => $assignableId,
                                 'is_required' => $assignmentData['is_required'] ?? true,
-                                'priority' => $assignmentData['priority'] ?? 1,
                                 'conditions' => $assignmentData['conditions'] ?? null
                             ]);
                         }
@@ -168,11 +211,13 @@ class WorkflowStepController extends Controller
                             'assignable_type' => $assignableType,
                             'assignable_id' => $assignableId,
                             'is_required' => $assignmentData['is_required'] ?? true,
-                            'priority' => $assignmentData['priority'] ?? 1,
                             'conditions' => $assignmentData['conditions'] ?? null
                         ]);
                     }
                 }
+            } elseif ($request->auto_approve) {
+                // If auto_approve is enabled, remove all existing assignments
+                $step->assignments()->delete();
             }
 
             DB::commit();
@@ -256,7 +301,18 @@ class WorkflowStepController extends Controller
      */
     public function getAssignableEntities(): JsonResponse
     {
-        $users = User::select('id', 'full_name as name', 'email')->get();
+        $users = User::with('department')
+            ->select('id', 'full_name as name', 'email', 'department_id')
+            ->get()
+            ->map(function($user) {
+                return [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'department_id' => $user->department_id,
+                    'department_name' => $user->department ? $user->department->name : null
+                ];
+            });
         $roles = Role::select('id', 'name', 'description')->get();
         $departments = Department::select('id', 'name', 'description')->get();
 
@@ -333,16 +389,15 @@ class WorkflowStepController extends Controller
                         'is_required' => $step->is_required,
                         'step_type' => $step->step_type,
                         'timeout_hours' => $step->timeout_hours,
-                        'auto_approve_if_condition_met' => $step->auto_approve_if_condition_met,
+                        'auto_approve' => $step->auto_approve,
                         'assignments_count' => $step->assignments->count(),
                         'assignments' => $step->assignments->map(function($assignment) {
                             $assignmentType = $this->getAssignmentTypeFromAssignable($assignment);
                             return [
                                 'id' => $assignment->id,
                                 'assignment_type' => $assignmentType,
-                                'user_id' => $assignmentType === 'user' ? $assignment->assignable_id : null,
+                                'user_id' => in_array($assignmentType, ['user', 'finance']) ? $this->getUserIdFromAssignment($assignment) : null,
                                 'is_required' => $assignment->is_required,
-                                'priority' => $assignment->priority,
                                 'assignable_name' => $this->getAssignableName($assignment)
                             ];
                         })
@@ -368,21 +423,48 @@ class WorkflowStepController extends Controller
     private function getAssignableName($assignment): string
     {
         try {
+            $assignable = $assignment->assignable;
+
+            if (!$assignable) {
+                return 'Unknown Assignment';
+            }
+
             switch ($assignment->assignable_type) {
                 case 'App\\Models\\User':
-                    $user = User::find($assignment->assignable_id);
-                    return $user ? $user->full_name : 'Unknown User';
+                    return $assignable->full_name ?? 'Unknown User';
+                case 'App\\Models\\FinanceAssignment':
+                    return $assignable->user ?
+                        $assignable->user->full_name . ' (Finance)' : 'Unknown Finance User';
                 case 'App\\Models\\Role':
-                    $role = Role::find($assignment->assignable_id);
-                    return $role ? $role->name : 'Unknown Role';
+                    return $assignable->name ?? 'Unknown Role';
                 case 'App\\\\Models\\\\Department':
-                    $department = Department::find($assignment->assignable_id);
-                    return $department ? $department->name : 'Unknown Department';
+                    return $assignable->name ?? 'Unknown Department';
                 default:
                     return 'Unknown';
             }
         } catch (\Exception $e) {
-            return 'Unknown';
+            return 'Unknown Assignment';
+        }
+    }
+
+    /**
+     * Get user ID from assignment
+     */
+    private function getUserIdFromAssignment($assignment): ?int
+    {
+        $assignable = $assignment->assignable;
+
+        if (!$assignable) {
+            return null;
+        }
+
+        switch ($assignment->assignable_type) {
+            case 'App\\Models\\User':
+                return $assignable->id;
+            case 'App\\Models\\FinanceAssignment':
+                return $assignable->user_id;
+            default:
+                return null;
         }
     }
 
@@ -394,6 +476,8 @@ class WorkflowStepController extends Controller
         switch ($assignmentType) {
             case 'user':
                 return 'App\\Models\\User';
+            case 'finance':
+                return 'App\\Models\\FinanceAssignment';
             case 'admin':
             case 'manager':
             case 'procurement':
@@ -408,12 +492,23 @@ class WorkflowStepController extends Controller
     /**
      * Get assignable ID based on assignment data
      */
-    private function getAssignableId($assignmentData)
+    private function getAssignableId($assignmentData, $assignableType)
     {
         $assignmentType = $assignmentData['assignment_type'];
 
         switch ($assignmentType) {
             case 'user':
+                return $assignmentData['user_id'] ?? null;
+            case 'finance':
+                // Create or find FinanceAssignment
+                if ($assignableType === 'App\\Models\\FinanceAssignment') {
+                    $financeAssignment = FinanceAssignment::firstOrCreate([
+                        'user_id' => $assignmentData['user_id']
+                    ], [
+                        'is_active' => true
+                    ]);
+                    return $financeAssignment->id;
+                }
                 return $assignmentData['user_id'] ?? null;
             case 'admin':
             case 'manager':
@@ -436,6 +531,8 @@ class WorkflowStepController extends Controller
         switch ($assignment->assignable_type) {
             case 'App\\Models\\User':
                 return 'user';
+            case 'App\\Models\\FinanceAssignment':
+                return 'finance';
             case 'App\\Models\\Role':
                 $role = Role::find($assignment->assignable_id);
                 return $role ? $role->name : 'admin';

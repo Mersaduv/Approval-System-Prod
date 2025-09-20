@@ -19,20 +19,20 @@ class WorkflowStep extends Model
         'conditions',
         'step_type',
         'timeout_hours',
-        'auto_approve_if_condition_met'
+        'auto_approve'
     ];
 
     protected $attributes = [
         'is_required' => true,
         'is_active' => true,
-        'auto_approve_if_condition_met' => false
+        'auto_approve' => false
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'is_required' => 'boolean',
         'conditions' => 'array',
-        'auto_approve_if_condition_met' => 'boolean'
+        'auto_approve' => 'boolean'
     ];
 
     /**
@@ -41,6 +41,20 @@ class WorkflowStep extends Model
     public function assignments(): HasMany
     {
         return $this->hasMany(WorkflowStepAssignment::class);
+    }
+
+    /**
+     * Boot the model
+     */
+    protected static function boot()
+    {
+        parent::boot();
+
+        // Delete related assignments when step is deleted
+        static::deleting(function ($step) {
+            $step->assignments()->delete();
+        });
+
     }
 
     /**
@@ -54,14 +68,52 @@ class WorkflowStep extends Model
     }
 
     /**
-     * Get steps that should be executed for a given request
+     * Get steps that should be executed for a given request (excluding auto approve steps)
      */
     public static function getStepsForRequest($request)
     {
         $steps = self::getActiveSteps();
         $applicableSteps = [];
 
+        // Check if the request creator is admin
+        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+
         foreach ($steps as $step) {
+            // Skip auto approve steps from workflow progress display
+            if ($step->auto_approve) {
+                continue;
+            }
+
+            // Skip manager assignment steps for admin requests
+            if ($isAdminRequest && self::isManagerAssignmentStep($step)) {
+                continue;
+            }
+
+            if (self::shouldExecuteStep($step, $request)) {
+                $applicableSteps[] = $step;
+            }
+        }
+
+        return collect($applicableSteps);
+    }
+
+    /**
+     * Get all steps for a given request (including auto approve steps)
+     */
+    public static function getAllStepsForRequest($request)
+    {
+        $steps = self::getActiveSteps();
+        $applicableSteps = [];
+
+        // Check if the request creator is admin
+        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+
+        foreach ($steps as $step) {
+            // Skip manager assignment steps for admin requests
+            if ($isAdminRequest && self::isManagerAssignmentStep($step)) {
+                continue;
+            }
+
             if (self::shouldExecuteStep($step, $request)) {
                 $applicableSteps[] = $step;
             }
@@ -135,7 +187,7 @@ class WorkflowStep extends Model
     /**
      * Get assigned users for this step
      */
-    public function getAssignedUsers()
+    public function getAssignedUsers($request = null)
     {
         $users = collect();
 
@@ -148,11 +200,22 @@ class WorkflowStep extends Model
             } elseif ($assignment->assignable_type === 'App\\Models\\Role') {
                 $roleUsers = User::whereHas('role', function($query) use ($assignment) {
                     $query->where('id', $assignment->assignable_id);
-                })->get();
-                $users = $users->merge($roleUsers);
+                });
+
+                // If request is provided and role is manager, filter by department
+                if ($request && $assignment->assignable_id == 2) { // Role ID 2 is manager
+                    $roleUsers->where('department_id', $request->employee->department_id);
+                }
+
+                $users = $users->merge($roleUsers->get());
             } elseif ($assignment->assignable_type === 'App\\Models\\Department') {
                 $deptUsers = User::where('department_id', $assignment->assignable_id)->get();
                 $users = $users->merge($deptUsers);
+            } elseif ($assignment->assignable_type === 'App\\Models\\FinanceAssignment') {
+                $financeAssignment = \App\Models\FinanceAssignment::find($assignment->assignable_id);
+                if ($financeAssignment && $financeAssignment->user) {
+                    $users->push($financeAssignment->user);
+                }
             }
         }
 
@@ -167,5 +230,33 @@ class WorkflowStep extends Model
         foreach ($stepIds as $index => $stepId) {
             self::where('id', $stepId)->update(['order_index' => $index]);
         }
+    }
+
+    /**
+     * Check if a step has manager assignments
+     */
+    public static function isManagerAssignmentStep($step): bool
+    {
+        return $step->assignments->some(function($assignment) {
+            // Check if assignment is for manager role
+            if ($assignment->assignable_type === 'App\\Models\\Role') {
+                $role = \App\Models\Role::find($assignment->assignable_id);
+                return $role && $role->name === 'manager';
+            }
+
+            // Check if assignment is for manager department
+            if ($assignment->assignable_type === 'App\\Models\\Department') {
+                $department = \App\Models\Department::find($assignment->assignable_id);
+                return $department && $department->name === 'Management'; // Assuming management department name
+            }
+
+            // Check if assignment is for a specific manager user
+            if ($assignment->assignable_type === 'App\\Models\\User') {
+                $user = \App\Models\User::find($assignment->assignable_id);
+                return $user && $user->role && $user->role->name === 'manager';
+            }
+
+            return false;
+        });
     }
 }

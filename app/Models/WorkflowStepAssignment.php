@@ -16,7 +16,6 @@ class WorkflowStepAssignment extends Model
         'assignable_type',
         'assignable_id',
         'is_required',
-        'priority',
         'conditions'
     ];
 
@@ -34,11 +33,41 @@ class WorkflowStepAssignment extends Model
     }
 
     /**
-     * Get the assignable entity (User, Role, or Department)
+     * Get the assignable entity (User, Role, Department, or FinanceAssignment)
      */
-    public function assignable(): MorphTo
+    public function assignable()
     {
-        return $this->morphTo();
+        switch ($this->assignable_type) {
+            case 'App\\Models\\User':
+                return $this->belongsTo(User::class, 'assignable_id');
+            case 'App\\Models\\FinanceAssignment':
+                return $this->belongsTo(FinanceAssignment::class, 'assignable_id');
+            case 'App\\Models\\Role':
+                return $this->belongsTo(Role::class, 'assignable_id');
+            case 'App\\Models\\Department':
+                return $this->belongsTo(Department::class, 'assignable_id');
+            default:
+                return $this->morphTo();
+        }
+    }
+
+    /**
+     * Get the assignable entity with proper handling for FinanceAssignment
+     */
+    public function getAssignableAttribute()
+    {
+        switch ($this->assignable_type) {
+            case 'App\\Models\\User':
+                return User::find($this->assignable_id);
+            case 'App\\Models\\FinanceAssignment':
+                return FinanceAssignment::with('user')->find($this->assignable_id);
+            case 'App\\Models\\Role':
+                return Role::find($this->assignable_id);
+            case 'App\\Models\\Department':
+                return Department::find($this->assignable_id);
+            default:
+                return null;
+        }
     }
 
     /**
@@ -49,6 +78,10 @@ class WorkflowStepAssignment extends Model
         switch ($this->assignable_type) {
             case 'App\\Models\\User':
                 return collect([User::find($this->assignable_id)])->filter();
+
+            case 'App\\Models\\FinanceAssignment':
+                $financeAssignment = FinanceAssignment::find($this->assignable_id);
+                return $financeAssignment ? collect([$financeAssignment->user])->filter() : collect();
 
             case 'App\\Models\\Role':
                 return User::whereHas('role', function($query) {

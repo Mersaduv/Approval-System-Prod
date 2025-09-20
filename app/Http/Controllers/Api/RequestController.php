@@ -28,7 +28,11 @@ class RequestController extends Controller
     public function index(Request $request): JsonResponse
     {
         $user = Auth::user();
-        $query = RequestModel::with(['employee', 'employee.department', 'procurement', 'notifications', 'verifiedBy']);
+        $query = RequestModel::with(['employee', 'employee.department', 'procurement', 'notifications', 'verifiedBy', 'auditLogs.user']);
+
+        // Check if user wants to see all requests (for managers, admins, and procurement users)
+        $tab = $request->get('tab', 'my-requests');
+        $showAllRequests = $tab === 'all-requests' && ($user->role->name === 'admin' || $user->role->name === 'manager' || $user->role->name === 'procurement');
 
         // Filter based on user role
         switch ($user->role->name) {
@@ -36,16 +40,16 @@ class RequestController extends Controller
                 $query->where('employee_id', $user->id);
                 break;
             case 'manager':
-                // Managers can see requests from their department OR requests assigned to their department in workflow steps OR requests assigned to them personally
-                $query->where(function($q) use ($user) {
-                    // Show requests from their own department
-                    $q->whereHas('employee', function($empQuery) use ($user) {
-                        $empQuery->where('department_id', $user->department_id);
-                    })
-                    // OR show requests assigned to their department in workflow steps
-                    ->orWhere(function($workflowQuery) use ($user) {
-                        $workflowQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
-                            ->whereExists(function($subQuery) use ($user) {
+                if ($showAllRequests) {
+                    // Show all requests that have been assigned to this manager (past or present)
+                    $query->where(function($q) use ($user) {
+                        // Show requests from their own department
+                        $q->whereHas('employee', function($empQuery) use ($user) {
+                            $empQuery->where('department_id', $user->department_id);
+                        })
+                        // OR show requests assigned to their department in workflow steps (any status)
+                        ->orWhere(function($workflowQuery) use ($user) {
+                            $workflowQuery->whereExists(function($subQuery) use ($user) {
                                 $subQuery->select(DB::raw(1))
                                     ->from('workflow_steps')
                                     ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
@@ -53,88 +57,156 @@ class RequestController extends Controller
                                     ->where('workflow_step_assignments.assignable_id', $user->department_id)
                                     ->where('workflow_steps.is_active', true);
                             });
-                    })
-                    // OR show requests assigned to them personally in workflow steps
-                    ->orWhere(function($personalQuery) use ($user) {
-                        $personalQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
-                            ->whereExists(function($subQuery) use ($user) {
+                        })
+                        // OR show requests assigned to them personally in workflow steps (any status)
+                        ->orWhere(function($personalQuery) use ($user) {
+                            $personalQuery->whereExists(function($subQuery) use ($user) {
                                 $subQuery->select(DB::raw(1))
                                     ->from('workflow_steps')
                                     ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                    ->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
-                                    ->where('workflow_step_assignments.assignable_id', $user->id)
-                                    ->where('workflow_steps.is_active', true);
+                                    ->where('workflow_steps.is_active', true)
+                                    ->where(function($assignmentQuery) use ($user) {
+                                        $assignmentQuery->where(function($userQuery) use ($user) {
+                                            $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                ->where('workflow_step_assignments.assignable_id', $user->id);
+                                        })
+                                        ->orWhere(function($financeQuery) use ($user) {
+                                            $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
+                                                ->whereExists(function($financeSubQuery) use ($user) {
+                                                    $financeSubQuery->select(DB::raw(1))
+                                                        ->from('finance_assignments')
+                                                        ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                                                        ->where('finance_assignments.user_id', $user->id)
+                                                        ->where('finance_assignments.is_active', true);
+                                                });
+                                        });
+                                    });
                             });
+                        });
                     });
-                });
+                } else {
+                    // Check if this is a Finance user (has FinanceAssignment)
+                    $isFinanceUser = \App\Models\FinanceAssignment::where('user_id', $user->id)
+                        ->where('is_active', true)
+                        ->exists();
+
+                    if ($isFinanceUser) {
+                        // Finance users should ONLY see requests that are currently at their assigned step
+                        $query->where(function($q) use ($user) {
+                            $q->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
+                                ->whereExists(function($subQuery) use ($user) {
+                                    $subQuery->select(DB::raw(1))
+                                        ->from('workflow_steps')
+                                        ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                        ->where('workflow_steps.is_active', true)
+                                        ->where(function($assignmentQuery) use ($user) {
+                                            $assignmentQuery->where(function($userQuery) use ($user) {
+                                                $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                    ->where('workflow_step_assignments.assignable_id', $user->id);
+                                            })
+                                            ->orWhere(function($financeQuery) use ($user) {
+                                                $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
+                                                    ->whereExists(function($financeSubQuery) use ($user) {
+                                                        $financeSubQuery->select(DB::raw(1))
+                                                            ->from('finance_assignments')
+                                                            ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                                                            ->where('finance_assignments.user_id', $user->id)
+                                                            ->where('finance_assignments.is_active', true);
+                                                    });
+                                            });
+                                        })
+                                        // Only show requests that are currently at this step (not completed yet)
+                                        ->whereNotExists(function($completedQuery) {
+                                            $completedQuery->select(DB::raw(1))
+                                                ->from('audit_logs')
+                                                ->whereColumn('audit_logs.request_id', 'requests.id')
+                                                ->where('audit_logs.action', 'Step completed')
+                                                ->where('audit_logs.notes', 'like', '%Finance Approval%');
+                                        })
+                                        // And ensure the step has been started
+                                        ->whereExists(function($startedQuery) {
+                                            $startedQuery->select(DB::raw(1))
+                                                ->from('audit_logs')
+                                                ->whereColumn('audit_logs.request_id', 'requests.id')
+                                                ->where('audit_logs.action', 'Workflow Step Started')
+                                                ->where('audit_logs.notes', 'like', '%Finance Approval%');
+                                        });
+                                });
+                        });
+                    } else {
+                        // Regular managers see requests from their department and assigned to them
+                        $query->where(function($q) use ($user) {
+                            // Show requests from their own department
+                            $q->whereHas('employee', function($empQuery) use ($user) {
+                                $empQuery->where('department_id', $user->department_id);
+                            })
+                            // OR show requests assigned to their department in workflow steps
+                            ->orWhere(function($workflowQuery) use ($user) {
+                                $workflowQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
+                                    ->whereExists(function($subQuery) use ($user) {
+                                        $subQuery->select(DB::raw(1))
+                                            ->from('workflow_steps')
+                                            ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                            ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
+                                            ->where('workflow_step_assignments.assignable_id', $user->department_id)
+                                            ->where('workflow_steps.is_active', true);
+                                    });
+                            })
+                            // OR show requests assigned to them personally in workflow steps
+                            ->orWhere(function($personalQuery) use ($user) {
+                                $personalQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
+                                    ->whereExists(function($subQuery) use ($user) {
+                                        $subQuery->select(DB::raw(1))
+                                            ->from('workflow_steps')
+                                            ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                            ->where('workflow_steps.is_active', true)
+                                            ->where(function($assignmentQuery) use ($user) {
+                                                $assignmentQuery->where(function($userQuery) use ($user) {
+                                                    $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                        ->where('workflow_step_assignments.assignable_id', $user->id);
+                                                })
+                                                ->orWhere(function($financeQuery) use ($user) {
+                                                    $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
+                                                        ->whereExists(function($financeSubQuery) use ($user) {
+                                                            $financeSubQuery->select(DB::raw(1))
+                                                                ->from('finance_assignments')
+                                                                ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                                                                ->where('finance_assignments.user_id', $user->id)
+                                                                ->where('finance_assignments.is_active', true);
+                                                        });
+                                                });
+                                            });
+                                    });
+                            });
+                        });
+                    }
+                }
                 break;
             case 'procurement':
-                // Procurement users can see their own requests OR requests assigned to them in workflow steps
-                $query->where(function($q) use ($user) {
-                    // Show their own requests
-                    $q->where('employee_id', $user->id)
-                    // OR show requests assigned to them in workflow steps
-                    ->orWhere(function($workflowQuery) use ($user) {
-                        $workflowQuery->whereIn('status', [
-                            'Pending Procurement Verification',
-                            'Pending Approval',
-                            'Approved',
-                            'Pending Procurement',
-                            'Ordered',
-                            'Delivered',
-                            'Cancelled'
-                        ])
-                        ->whereExists(function($subQuery) use ($user) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('workflow_steps')
-                                ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                ->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
-                                ->where('workflow_step_assignments.assignable_id', $user->id)
-                                ->where('workflow_steps.is_active', true);
-                        });
-                    })
-                    ->orWhere(function($departmentQuery) use ($user) {
-                        $departmentQuery->whereIn('status', [
-                            'Pending Procurement Verification',
-                            'Pending Approval',
-                            'Approved',
-                            'Pending Procurement',
-                            'Ordered',
-                            'Delivered',
-                            'Cancelled'
-                        ])
-                        ->whereExists(function($subQuery) use ($user) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('workflow_steps')
-                                ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
-                                ->where('workflow_step_assignments.assignable_id', $user->department_id)
-                                ->where('workflow_steps.is_active', true);
-                        });
-                    })
-                    ->orWhere(function($roleQuery) use ($user) {
-                        $roleQuery->whereIn('status', [
-                            'Pending Procurement Verification',
-                            'Pending Approval',
-                            'Approved',
-                            'Pending Procurement',
-                            'Ordered',
-                            'Delivered',
-                            'Cancelled'
-                        ])
-                        ->whereExists(function($subQuery) use ($user) {
-                            $subQuery->select(DB::raw(1))
-                                ->from('workflow_steps')
-                                ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Role')
-                                ->where('workflow_step_assignments.assignable_id', $user->role_id)
-                                ->where('workflow_steps.is_active', true);
-                        });
-                    });
-                });
+                if ($showAllRequests) {
+                    // Show all requests that are in procurement workflow
+                    // Procurement users should see ALL requests in procurement workflow, not just assigned ones
+                    $query->whereIn('status', [
+                        'Pending Procurement Verification',
+                        'Pending Approval',
+                        'Approved',
+                        'Rejected',
+                        'Pending Procurement',
+                        'Ordered',
+                        'Delivered',
+                        'Cancelled'
+                    ]);
+                } else {
+                    // Show only requests created by the current user
+                    $query->where('employee_id', $user->id);
+                }
                 break;
             case 'admin':
-                // Can see all requests
+                if (!$showAllRequests) {
+                    // Admin can see all requests by default, but if they want "My Requests", show only their own
+                    $query->where('employee_id', $user->id);
+                }
+                // If showAllRequests is true, admin sees everything (no additional filtering)
                 break;
             default:
                 // For other roles (like Finance), check if they are assigned to any workflow steps
@@ -166,7 +238,17 @@ class RequestController extends Controller
 
         // Apply filters
         if ($request->has('status')) {
-            $query->where('status', $request->status);
+            if ($request->status === 'Delayed') {
+                // For Delayed status, filter by audit logs using raw query
+                $query->whereExists(function($subQuery) {
+                    $subQuery->select(DB::raw(1))
+                        ->from('audit_logs')
+                        ->whereColumn('audit_logs.request_id', 'requests.id')
+                        ->where('audit_logs.action', 'Delayed');
+                });
+            } else {
+                $query->where('status', $request->status);
+            }
         }
 
         if ($request->has('department_id')) {
@@ -175,7 +257,7 @@ class RequestController extends Controller
             });
         }
 
-        $requests = $query->orderBy('created_at', 'desc')->paginate(15);
+        $requests = $query->orderBy('created_at', 'desc')->get();
 
         return response()->json([
             'success' => true,
@@ -232,7 +314,8 @@ class RequestController extends Controller
             'procurement',
             'notifications.receiver',
             'auditLogs.user',
-            'verifiedBy'
+            'verifiedBy',
+            'billPrintedBy'
         ])->findOrFail($id);
 
         // Check if user can view this request
@@ -245,6 +328,9 @@ class RequestController extends Controller
 
         // Add approval workflow information
         $request->approval_workflow = $this->getApprovalWorkflowInfo($request);
+
+        // Add delegation information if user is acting on behalf of someone
+        $request->delegation_info = $this->getDelegationInfo($request, Auth::user());
 
         return response()->json([
             'success' => true,
@@ -326,6 +412,320 @@ class RequestController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Delay a request for later review
+     */
+    public function delay(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'delay_date' => 'required|date|after_or_equal:today',
+            'delay_reason' => 'nullable|string|max:1000'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $requestModel = RequestModel::findOrFail($id);
+            $user = Auth::user();
+
+            // Check if user can delay this request (only Finance assignment)
+            if ($user->id !== 28) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only Finance users can delay requests'
+                ], 403);
+            }
+
+            // Check if request is in correct status for delay
+            if (!in_array($requestModel->status, ['Pending', 'Pending Approval'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Request is not in a valid status for delay'
+                ], 400);
+            }
+
+            // Use WorkflowService to delay the workflow step
+            $workflowService = app(\App\Services\WorkflowService::class);
+            $workflowService->delayWorkflowStep(
+                $requestModel->id,
+                $user->id,
+                $request->input('delay_date'),
+                $request->input('delay_reason')
+            );
+
+            // Also log the legacy delay action for backward compatibility
+            AuditLog::create([
+                'user_id' => $user->id,
+                'request_id' => $requestModel->id,
+                'action' => 'Delayed',
+                'notes' => "Request delayed until {$request->input('delay_date')}" .
+                          ($request->input('delay_reason') ? " - {$request->input('delay_reason')}" : "")
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Request delayed successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delay request',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Process bill printing for a request
+     */
+    public function billPrinting(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'bill_amount' => 'required|numeric|min:0'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $requestModel = RequestModel::findOrFail($id);
+            $user = Auth::user();
+
+            // Check if user is authorized to process bill printing
+            if (!$this->canProcessBillPrinting($requestModel, $user)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You are not authorized to process bill printing for this request'
+                ], 403);
+            }
+
+            // Update request with bill printing information
+            $billNumber = $this->generateBillNumber();
+            $requestModel->update([
+                'bill_number' => $billNumber,
+                'bill_amount' => $request->input('bill_amount'),
+                'bill_printed_at' => now(),
+                'bill_printed_by' => $user->id,
+                'bill_status' => 'printed'
+            ]);
+
+            // Log the bill printing action
+            AuditLog::create([
+                'user_id' => $user->id,
+                'request_id' => $requestModel->id,
+                'action' => 'Bill Printed',
+                'details' => "Bill printed with number: {$billNumber}, Amount: {$request->input('bill_amount')}"
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Bill printed successfully',
+                'data' => [
+                    'bill_number' => $request->input('bill_number'),
+                    'bill_amount' => $request->input('bill_amount'),
+                    'bill_printed_at' => $requestModel->bill_printed_at
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to process bill printing',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Finance approval with bill printing
+     */
+    public function financeApproveWithBill(Request $request, string $id): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'notes' => 'nullable|string|max:1000',
+            'bill_amount' => 'required|numeric|min:0'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $requestModel = RequestModel::findOrFail($id);
+            $user = Auth::user();
+
+            // Check if user is authorized (Finance user)
+            if (!$this->canProcessBillPrinting($requestModel, $user)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You are not authorized to process this request'
+                ], 403);
+            }
+
+            DB::beginTransaction();
+
+            // Generate automatic bill number
+            $billNumber = $this->generateBillNumber();
+
+            // First, process bill printing
+            $requestModel->update([
+                'bill_number' => $billNumber,
+                'bill_amount' => $request->input('bill_amount'),
+                'bill_printed_at' => now(),
+                'bill_printed_by' => $user->id,
+                'bill_status' => 'printed'
+            ]);
+
+            // Log the bill printing action
+            AuditLog::create([
+                'user_id' => $user->id,
+                'request_id' => $requestModel->id,
+                'action' => 'Bill Printed',
+                'details' => "Bill printed with number: {$billNumber}, Amount: {$requestModel->amount}"
+            ]);
+
+            // Then, approve the request
+            $this->workflowService->approveRequest(
+                $id,
+                $user->id,
+                $request->input('notes') . " (Bill printed: {$billNumber})"
+            );
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Request approved and bill printed successfully',
+                'data' => [
+                    'bill_number' => $billNumber,
+                    'bill_amount' => $requestModel->amount,
+                    'bill_printed_at' => $requestModel->fresh()->bill_printed_at
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to approve request and print bill',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    private function generateBillNumber()
+    {
+        $year = date('Y');
+        $month = date('m');
+
+        // Get the last bill number for this year and month
+        $lastBill = RequestModel::whereNotNull('bill_number')
+            ->where('bill_number', 'like', "BILL-{$year}{$month}-%")
+            ->orderBy('bill_number', 'desc')
+            ->first();
+
+        if ($lastBill) {
+            // Extract the number part and increment
+            $parts = explode('-', $lastBill->bill_number);
+            $lastNumber = (int) end($parts);
+            $newNumber = $lastNumber + 1;
+        } else {
+            $newNumber = 1;
+        }
+
+        return "BILL-{$year}{$month}-" . str_pad($newNumber, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Check if user can process bill printing
+     */
+    private function canProcessBillPrinting(RequestModel $request, User $user): bool
+    {
+        // Check if user is from Finance department and assigned to this request
+        if ($user->department && $user->department->name === 'Finance') {
+            // Check if this user is assigned to the current workflow step
+            $currentStep = $this->getCurrentWorkflowStep($request);
+            if ($currentStep) {
+                $assignments = $currentStep->assignments;
+                foreach ($assignments as $assignment) {
+                    // Check for direct user assignment
+                    if ($assignment->assignable_type === 'App\\Models\\User' &&
+                        $assignment->assignable_id == $user->id) {
+                        return true;
+                    }
+
+                    // Check for FinanceAssignment assignment
+                    if ($assignment->assignable_type === 'App\\Models\\FinanceAssignment') {
+                        $financeAssignment = \App\Models\FinanceAssignment::find($assignment->assignable_id);
+                        if ($financeAssignment && $financeAssignment->user_id == $user->id && $financeAssignment->is_active) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check if user is from Procurement department and assigned to this request
+        if ($user->department && $user->department->name === 'Procurement') {
+            // Check if this user is assigned to the current workflow step
+            $currentStep = $this->getCurrentWorkflowStep($request);
+            if ($currentStep) {
+                $assignments = $currentStep->assignments;
+                foreach ($assignments as $assignment) {
+                    // Check for direct user assignment
+                    if ($assignment->assignable_type === 'App\\Models\\User' &&
+                        $assignment->assignable_id == $user->id) {
+                        return true;
+                    }
+
+                    // Check for role assignment
+                    if ($assignment->assignable_type === 'App\\Models\\Role' &&
+                        $assignment->assignable_id == $user->role_id) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get current workflow step for a request
+     */
+    private function getCurrentWorkflowStep(RequestModel $request)
+    {
+        // Get the current pending step for this request
+        $workflowSteps = \App\Models\WorkflowStep::getStepsForRequest($request);
+
+        foreach ($workflowSteps as $step) {
+            // Check if this step is currently pending
+            if ($this->isStepPending($request, $step, $workflowSteps->search(function($s) use ($step) {
+                return $s->id === $step->id;
+            }))) {
+                return $step;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -443,22 +843,47 @@ class RequestController extends Controller
                 ], 403);
             }
 
+            // Check if user wants to see all requests or just their own
+            $tab = $request->get('tab', 'all-requests');
+            $showAllRequests = $tab === 'all-requests';
+
             // Get all requests that are in procurement workflow
-            // This includes: Pending Procurement Verification, Pending Approval, Approved, Pending Procurement, Ordered, Delivered, Cancelled
+            // This includes: Pending Procurement Verification, Pending Approval, Approved, Rejected, Pending Procurement, Ordered, Delivered, Cancelled
             $query = RequestModel::whereIn('status', [
                 'Pending Procurement Verification',
                 'Pending Approval',
                 'Approved',
+                'Rejected',
                 'Pending Procurement',
                 'Ordered',
                 'Delivered',
                 'Cancelled'
             ])
-            ->with(['employee.department', 'procurement', 'verifiedBy']);
+            ->with(['employee.department', 'procurement', 'verifiedBy', 'auditLogs.user']);
+
+            // Filter based on tab
+            if ($tab === 'my-requests') {
+                // Show only requests created by the current user
+                $query->where('employee_id', $user->id);
+            } else {
+                // Show all requests (all-requests tab)
+                // For procurement users, this means all requests that are in procurement workflow
+                // No additional filtering needed as the status filter above already handles this
+            }
 
             // Apply status filter if provided
             if ($request->has('status') && $request->status !== 'all') {
-                $query->where('status', $request->status);
+                if ($request->status === 'Delayed') {
+                    // For Delayed status, filter by audit logs using raw query
+                    $query->whereExists(function($subQuery) {
+                        $subQuery->select(DB::raw(1))
+                            ->from('audit_logs')
+                            ->whereColumn('audit_logs.request_id', 'requests.id')
+                            ->where('audit_logs.action', 'Delayed');
+                    });
+                } else {
+                    $query->where('status', $request->status);
+                }
             }
 
             $requests = $query->orderBy('created_at', 'desc')->get();
@@ -472,6 +897,42 @@ class RequestController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to fetch procurement requests',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get approved requests ready for procurement
+     */
+    public function approvedRequests(Request $request): JsonResponse
+    {
+        try {
+            // Check if user can process procurement
+            /** @var \App\Models\User $user */
+            $user = Auth::user();
+            if (!$user || !$user->canProcessProcurement()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only procurement team members can view approved requests'
+                ], 403);
+            }
+
+            // Get all approved requests (ready for procurement)
+            $query = RequestModel::where('status', 'Approved')
+                ->with(['employee.department', 'procurement', 'verifiedBy']);
+
+            $requests = $query->orderBy('created_at', 'desc')->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $requests
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch approved requests',
                 'error' => $e->getMessage()
             ], 500);
         }
@@ -649,7 +1110,7 @@ class RequestController extends Controller
     }
 
     /**
-     * Get audit logs for a request
+     * Get audit logs for a request (only important logs)
      */
     public function auditLogs(string $id): JsonResponse
     {
@@ -663,9 +1124,19 @@ class RequestController extends Controller
             ], 403);
         }
 
+        // Get all workflow-related audit logs
         $auditLogs = $request->auditLogs()
             ->with('user')
-            ->orderBy('created_at', 'desc')
+            ->whereIn('action', [
+                'Workflow Step Completed',
+                'Workflow Step Rejected',
+                'Workflow Step Delayed',
+                'Workflow Step Cancelled',
+                'Step Forwarded',
+                'Submitted',
+                'All Approvals Complete'
+            ])
+            ->orderBy('created_at', 'asc') // Show in chronological order
             ->get();
 
         return response()->json([
@@ -683,15 +1154,12 @@ class RequestController extends Controller
         $department = $employee->department;
         $amount = $request->amount;
 
-        // Check if request is rejected
-        if ($request->status === 'Rejected') {
+        // Check if request is rejected or cancelled
+        if ($request->status === 'Rejected' || $request->status === 'Cancelled') {
             return $this->getRejectedWorkflowInfo($request);
         }
 
-        // Special handling for procurement users - all steps are auto-approved
-        if ($employee->isProcurement()) {
-            return $this->getProcurementWorkflowInfo($request);
-        }
+        // Procurement users follow the same standard workflow as other users
 
         // Use dynamic workflow steps from WorkflowStep model
         $workflowSteps = \App\Models\WorkflowStep::getStepsForRequest($request);
@@ -715,7 +1183,15 @@ class RequestController extends Controller
         $waitingFor = null;
         $nextApprover = null;
 
+        // Check if the request creator is admin
+        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+
         foreach ($workflowSteps as $index => $step) {
+            // Skip manager assignment steps for admin requests
+            if ($isAdminRequest && $this->isManagerAssignmentStep($step)) {
+                continue;
+            }
+
             $stepStatus = $this->getStepStatus($request, $step, $index);
             $stepInfo = [
                 'id' => $step->id,
@@ -733,8 +1209,7 @@ class RequestController extends Controller
                         'id' => $assignment->id,
                         'assignment_type' => $this->getAssignmentType($assignment),
                         'assignable_name' => $this->getAssignableName($assignment),
-                        'is_required' => $assignment->is_required,
-                        'priority' => $assignment->priority
+                        'is_required' => $assignment->is_required
                     ];
                 })
             ];
@@ -744,6 +1219,9 @@ class RequestController extends Controller
             // Determine current step and waiting status
             if ($stepStatus === 'completed') {
                 $currentStep = $index + 1;
+            } elseif ($stepStatus === 'cancelled' || $stepStatus === 'rejected') {
+                // For cancelled or rejected steps, don't update currentStep
+                // The workflow is stopped at this point
             } elseif ($stepStatus === 'pending' && !$waitingFor) {
                 $waitingFor = $stepInfo['role'];
                 $nextApprover = $stepInfo['approver'];
@@ -777,6 +1255,11 @@ class RequestController extends Controller
      */
     private function getStepStatus(RequestModel $request, $step, $index): string
     {
+        // Check if step is cancelled
+        if ($this->isStepCancelled($request, $step)) {
+            return 'cancelled';
+        }
+
         // Check if step is rejected
         if ($this->isStepRejected($request, $step)) {
             return 'rejected';
@@ -816,20 +1299,81 @@ class RequestController extends Controller
     }
 
     /**
+     * Check if step is cancelled
+     */
+    private function isStepCancelled(RequestModel $request, $step): bool
+    {
+        // Check if step is specifically cancelled in audit logs
+        $stepCancelled = AuditLog::where('request_id', $request->id)
+            ->where('action', 'Workflow Step Cancelled')
+            ->where('notes', 'like', '%' . $step->name . '%')
+            ->exists();
+
+        if ($stepCancelled) {
+            return true;
+        }
+
+        // Check for procurement step cancellation
+        if ($step->step_type === 'approval' && $step->name === 'Procurement order') {
+            // For procurement order step, check if request status is Cancelled
+            if ($request->status === 'Cancelled') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Check if step is rejected
      */
     private function isStepRejected(RequestModel $request, $step): bool
     {
-        // Check if request is rejected
-        if ($request->status === 'Rejected') {
+        // Check if step is specifically rejected in audit logs
+        $stepRejected = AuditLog::where('request_id', $request->id)
+            ->where('action', 'Workflow Step Rejected')
+            ->where('notes', 'like', '%' . $step->name . '%')
+            ->exists();
+
+        if ($stepRejected) {
             return true;
         }
 
-        // Check if step is specifically rejected
-        return AuditLog::where('request_id', $request->id)
-            ->where('action', 'Step Rejected')
+        // Check if step is specifically cancelled in audit logs
+        $stepCancelled = AuditLog::where('request_id', $request->id)
+            ->where('action', 'Workflow Step Cancelled')
             ->where('notes', 'like', '%' . $step->name . '%')
             ->exists();
+
+        if ($stepCancelled) {
+            return true;
+        }
+
+        // Check for verification step rejection
+        if ($step->step_type === 'verification') {
+            // For procurement verification, check if it was rejected
+            if ($request->procurement_status === 'Rejected' || $request->procurement_status === 'Not Available') {
+                return true;
+            }
+        }
+
+        // If request is rejected, check if this step was the one that caused the rejection
+        if ($request->status === 'Rejected') {
+            // Check if this step was the current pending step when rejected
+            $rejectionLog = AuditLog::where('request_id', $request->id)
+                ->where('action', 'Workflow Step Rejected')
+                ->orderBy('created_at', 'desc')
+                ->first();
+
+            if ($rejectionLog && $rejectionLog->notes && strpos($rejectionLog->notes, $step->name) !== false) {
+                return true;
+            }
+
+            // Only return true if this specific step was rejected, not all steps
+            return false;
+        }
+
+        return false;
     }
 
     /**
@@ -837,8 +1381,8 @@ class RequestController extends Controller
      */
     private function isStepPending(RequestModel $request, $step, $index): bool
     {
-        // If step is already completed or rejected, it's not pending
-        if ($this->isStepCompleted($request, $step) || $this->isStepRejected($request, $step)) {
+        // If step is already completed, rejected, or cancelled, it's not pending
+        if ($this->isStepCompleted($request, $step) || $this->isStepRejected($request, $step) || $this->isStepCancelled($request, $step)) {
             return false;
         }
 
@@ -873,6 +1417,22 @@ class RequestController extends Controller
     {
         if ($step->description) {
             return $step->description;
+        }
+
+        // Return status-specific descriptions
+        switch ($status) {
+            case 'cancelled':
+                return 'Step cancelled';
+            case 'rejected':
+                return 'Step rejected';
+            case 'completed':
+                return 'Step completed';
+            case 'pending':
+                return 'Waiting for approval';
+            case 'waiting':
+                return 'Waiting for previous steps';
+            default:
+                break;
         }
 
         switch ($step->step_type) {
@@ -918,6 +1478,8 @@ class RequestController extends Controller
             case 'App\\Models\\Department':
                 $department = \App\Models\Department::find($assignment->assignable_id);
                 return $department ? $department->name : 'department';
+            case 'App\\Models\\FinanceAssignment':
+                return 'finance';
             default:
                 return 'unknown';
         }
@@ -938,6 +1500,9 @@ class RequestController extends Controller
             case 'App\\Models\\Department':
                 $department = \App\Models\Department::find($assignment->assignable_id);
                 return $department ? $department->name : 'Unknown Department';
+            case 'App\\Models\\FinanceAssignment':
+                $financeAssignment = \App\Models\FinanceAssignment::with('user')->find($assignment->assignable_id);
+                return $financeAssignment && $financeAssignment->user ? $financeAssignment->user->full_name : 'Finance User';
             default:
                 return 'Unknown';
         }
@@ -948,99 +1513,15 @@ class RequestController extends Controller
      */
     private function isApprovalStepCompleted(RequestModel $request, $step): bool
     {
-        // Check if step is specifically completed in audit logs
-        $stepName = strtolower($step->name);
+        // Use WorkflowService to check step completion with proper required assignments logic
+        $workflowService = app(\App\Services\WorkflowService::class);
 
-        // Check for step completion in audit logs
-        $stepCompleted = AuditLog::where('request_id', $request->id)
-            ->where('action', 'Step completed')
-            ->where('notes', 'like', '%' . $step->name . '%')
-            ->exists();
+        // Use reflection to access private method
+        $reflection = new \ReflectionClass($workflowService);
+        $method = $reflection->getMethod('isStepCompleted');
+        $method->setAccessible(true);
 
-        if ($stepCompleted) {
-            return true;
-        }
-
-        // For approval steps, also check if user has approved
-        if ($step->step_type === 'approval') {
-            // Check if manager has approved (for Manager Approval step)
-            if (strpos($stepName, 'manager') !== false) {
-                $managerApproved = AuditLog::where('request_id', $request->id)
-                    ->where('action', 'Approved')
-                    ->whereHas('user', function($query) {
-                        $query->whereHas('role', function($q) {
-                            $q->where('name', 'manager');
-                        });
-                    })
-                    ->exists();
-
-                if ($managerApproved) {
-                    return true;
-                }
-            }
-
-            // Check if admin has approved (for CEO/Admin Approval step)
-            if (strpos($stepName, 'ceo') !== false || strpos($stepName, 'admin') !== false) {
-                $adminApproved = AuditLog::where('request_id', $request->id)
-                    ->where('action', 'Approved')
-                    ->whereHas('user', function($query) {
-                        $query->whereHas('role', function($q) {
-                            $q->where('name', 'admin');
-                        });
-                    })
-                    ->exists();
-
-                if ($adminApproved) {
-                    return true;
-                }
-            }
-
-            // Check if finance has approved (for Finance Approval step)
-            if (strpos($stepName, 'finance') !== false) {
-                $financeApproved = AuditLog::where('request_id', $request->id)
-                    ->where('action', 'Approved')
-                    ->whereHas('user', function($query) {
-                        $query->whereHas('role', function($q) {
-                            $q->where('name', 'manager');
-                        })->where('department_id', 3); // Finance department
-                    })
-                    ->exists();
-
-                if ($financeApproved) {
-                    return true;
-                }
-            }
-        }
-
-        // For Procurement Processing step, check if request is in procurement phase
-        if (strpos($stepName, 'procurement processing') !== false) {
-            return in_array($request->status, ['Pending Procurement', 'Ordered', 'Delivered']);
-        }
-
-        // For other approval steps, check if request is approved or beyond
-        if (in_array($request->status, ['Approved', 'Pending Procurement', 'Ordered', 'Delivered'])) {
-            // Manager approval is completed when status is Approved or beyond
-            if (strpos($stepName, 'manager') !== false) {
-                return true;
-            }
-
-            // CEO/Admin approval is completed when status is Approved or beyond
-            if (strpos($stepName, 'ceo') !== false || strpos($stepName, 'admin') !== false) {
-                return true;
-            }
-
-            // Finance approval is completed when status is Approved or beyond
-            if (strpos($stepName, 'finance') !== false) {
-                return true;
-            }
-
-            // Auto-approval is completed when status is Approved or beyond
-            if (strpos($stepName, 'auto') !== false) {
-                return true;
-            }
-        }
-
-        return false;
+        return $method->invoke($workflowService, $request, $step);
     }
 
     /**
@@ -1389,16 +1870,65 @@ class RequestController extends Controller
      */
     private function getRejectedWorkflowInfo(RequestModel $request): array
     {
-        // Get the rejection details from audit logs
+        // Get the rejection or cancellation details from audit logs
         $rejectionLog = \App\Models\AuditLog::where('request_id', $request->id)
-            ->where('action', 'Rejected')
+            ->whereIn('action', ['Workflow Step Rejected', 'Workflow Step Cancelled'])
             ->with('user')
             ->first();
 
         $rejectedBy = $rejectionLog ? $rejectionLog->user->full_name : 'Unknown';
         $rejectionReason = $rejectionLog ? $rejectionLog->notes : 'No reason provided';
 
-        // Show the workflow steps that were in progress when rejected
+        // Use dynamic workflow steps if available
+        $workflowSteps = \App\Models\WorkflowStep::getStepsForRequest($request);
+
+        if (!$workflowSteps->isEmpty()) {
+            // Use dynamic workflow steps
+            $steps = [];
+            $currentStep = 0;
+            $totalSteps = $workflowSteps->count();
+
+            foreach ($workflowSteps as $index => $step) {
+                $stepStatus = $this->getStepStatus($request, $step, $index);
+                $stepInfo = [
+                    'id' => $step->id,
+                    'name' => $step->name,
+                    'role' => $this->getStepRoleName($step),
+                    'status' => $stepStatus,
+                    'description' => $step->description ?: $this->getStepDescription($step, $stepStatus),
+                    'approver' => $this->getStepApprover($step),
+                    'order' => $step->order_index,
+                    'step_type' => $step->step_type,
+                    'is_active' => $step->is_active,
+                    'timeout_hours' => $step->timeout_hours,
+                ];
+
+                $steps[] = $stepInfo;
+
+                // Count completed steps
+                if ($stepStatus === 'completed') {
+                    $currentStep = $index + 1;
+                }
+            }
+
+            return [
+                'is_sequential' => true,
+                'current_step' => $currentStep,
+                'total_steps' => $totalSteps,
+                'steps' => $steps,
+                'next_approver' => null,
+                'waiting_for' => null,
+                'workflow_type' => 'dynamic',
+                'rejection_info' => [
+                    'rejected_by' => $rejectedBy,
+                    'rejection_reason' => $rejectionReason,
+                    'rejected_at' => $rejectionLog ? $rejectionLog->created_at : null,
+                    'is_cancelled' => $request->status === 'Cancelled'
+                ]
+            ];
+        }
+
+        // Fallback to legacy system
         $employee = $request->employee;
         $department = $employee->department;
         $amount = $request->amount;
@@ -1472,6 +2002,7 @@ class RequestController extends Controller
             'steps' => $steps,
             'next_approver' => null,
             'waiting_for' => null,
+            'workflow_type' => 'legacy',
             'rejection_info' => [
                 'rejected_by' => $rejectedBy,
                 'rejection_reason' => $rejectionReason,
@@ -1582,27 +2113,44 @@ class RequestController extends Controller
      */
     private function canViewRequest(RequestModel $request, $user): bool
     {
+        // Admin can see everything
+        if ($user->role->name === 'admin') {
+            return true;
+        }
+
+        // Every user can see their own requests in any status
+        if ($request->employee_id === $user->id) {
+            return true;
+        }
+
         switch ($user->role->name) {
             case 'employee':
                 return $request->employee_id === $user->id;
             case 'manager':
-                // Managers can view requests from their department OR requests assigned to them in workflow steps
-                if ($request->employee->department_id === $user->department_id) {
-                    return true;
+                // Check if this is a Finance user (has FinanceAssignment)
+                $isFinanceUser = \App\Models\FinanceAssignment::where('user_id', $user->id)
+                    ->where('is_active', true)
+                    ->exists();
+
+                if ($isFinanceUser) {
+                    // Finance users can view requests assigned to them via FinanceAssignment
+                    if (in_array($request->status, ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Rejected'])) {
+                        return $this->isRequestAssignedToUserPersonally($request, $user);
+                    }
+                    return false;
+                } else {
+                    // Regular managers can view requests from their department OR requests assigned to them in workflow steps
+                    if ($request->employee->department_id === $user->department_id) {
+                        return true;
+                    }
+                    // Check if request is assigned to them personally in workflow steps
+                    if (in_array($request->status, ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Rejected'])) {
+                        return $this->isRequestAssignedToUserPersonally($request, $user) ||
+                               $this->isRequestAssignedToUserDepartment($request, $user);
+                    }
+                    return false;
                 }
-                // Check if request is assigned to them personally in workflow steps
-                if (in_array($request->status, ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])) {
-                    return $this->isRequestAssignedToUserPersonally($request, $user) ||
-                           $this->isRequestAssignedToUserDepartment($request, $user);
-                }
-                return false;
-            case 'admin':
-                return true;
             case 'procurement':
-                // Procurement can view their own requests (any status) OR all procurement-related requests
-                if ($request->employee_id === $user->id) {
-                    return true;
-                }
                 // Check if request is assigned to procurement in workflow steps
                 if (in_array($request->status, [
                     'Pending Procurement Verification',
@@ -1611,7 +2159,8 @@ class RequestController extends Controller
                     'Pending Procurement',
                     'Ordered',
                     'Delivered',
-                    'Cancelled'
+                    'Cancelled',
+                    'Rejected'
                 ])) {
                     return $this->isRequestAssignedToProcurement($request, $user);
                 }
@@ -1620,7 +2169,7 @@ class RequestController extends Controller
                 // For other roles (like Finance), check if they are assigned to any workflow steps
                 if ($this->isUserAssignedToAnyWorkflowStep($user)) {
                     // Finance users can view requests that are assigned to their department in workflow steps
-                    return in_array($request->status, ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered']) &&
+                    return in_array($request->status, ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Rejected']) &&
                            $this->isRequestAssignedToUserDepartment($request, $user);
                 }
                 // If user is not assigned to any workflow step, only show their own requests
@@ -1636,14 +2185,13 @@ class RequestController extends Controller
         // Get current workflow steps
         $workflowSteps = \App\Models\WorkflowStep::getStepsForRequest($request);
 
-        foreach ($workflowSteps as $step) {
-            $stepStatus = $this->getStepStatus($request, $step, 0); // We'll check each step individually
+        // Find the first pending step (current step in sequence)
+        foreach ($workflowSteps as $index => $step) {
+            $stepStatus = $this->getStepStatus($request, $step, $index);
 
             // If this step is pending, check if user can approve it
             if ($stepStatus === 'pending') {
-                if ($this->canUserApproveStep($step, $user)) {
-                    return true;
-                }
+                return $this->canUserApproveStep($step, $user);
             }
         }
 
@@ -1675,6 +2223,11 @@ class RequestController extends Controller
      */
     private function isUserAssignedToStep($assignment, $user): bool
     {
+        // If user is null, return false
+        if (!$user) {
+            return false;
+        }
+
         switch ($assignment->assignable_type) {
             case 'App\\Models\\User':
                 return $assignment->assignable_id == $user->id;
@@ -1682,6 +2235,11 @@ class RequestController extends Controller
                 return $assignment->assignable_id == $user->role_id;
             case 'App\\Models\\Department':
                 return $assignment->assignable_id == $user->department_id;
+            case 'App\\Models\\FinanceAssignment':
+                return \App\Models\FinanceAssignment::where('id', $assignment->assignable_id)
+                    ->where('user_id', $user->id)
+                    ->where('is_active', true)
+                    ->exists();
             default:
                 return false;
         }
@@ -1727,12 +2285,33 @@ class RequestController extends Controller
      */
     private function isRequestAssignedToUserPersonally(RequestModel $request, $user): bool
     {
-        return \App\Models\WorkflowStepAssignment::where('assignable_type', 'App\\Models\\User')
+        // Check direct user assignment
+        $userAssignment = \App\Models\WorkflowStepAssignment::where('assignable_type', 'App\\Models\\User')
             ->where('assignable_id', $user->id)
             ->whereHas('workflowStep', function($query) {
                 $query->where('is_active', true);
             })
             ->exists();
+
+        if ($userAssignment) {
+            return true;
+        }
+
+        // Check FinanceAssignment
+        $financeAssignment = \App\Models\WorkflowStepAssignment::where('assignable_type', 'App\\Models\\FinanceAssignment')
+            ->whereHas('workflowStep', function($query) {
+                $query->where('is_active', true);
+            })
+            ->whereExists(function($query) use ($user) {
+                $query->select(DB::raw(1))
+                    ->from('finance_assignments')
+                    ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                    ->where('finance_assignments.user_id', $user->id)
+                    ->where('finance_assignments.is_active', true);
+            })
+            ->exists();
+
+        return $financeAssignment;
     }
 
     /**
@@ -1876,5 +2455,69 @@ class RequestController extends Controller
         }
 
         return true;
+    }
+
+    /**
+     * Check if a step has manager assignments
+     */
+    private function isManagerAssignmentStep($step): bool
+    {
+        return $step->assignments->some(function($assignment) {
+            // Check if assignment is for manager role
+            if ($assignment->assignable_type === 'App\\Models\\Role') {
+                $role = \App\Models\Role::find($assignment->assignable_id);
+                return $role && $role->name === 'manager';
+            }
+
+            // Check if assignment is for manager department
+            if ($assignment->assignable_type === 'App\\Models\\Department') {
+                $department = \App\Models\Department::find($assignment->assignable_id);
+                return $department && $department->name === 'Management'; // Assuming management department name
+            }
+
+            // Check if assignment is for a specific manager user
+            if ($assignment->assignable_type === 'App\\Models\\User') {
+                $user = \App\Models\User::find($assignment->assignable_id);
+                return $user && $user->role && $user->role->name === 'manager';
+            }
+
+            return false;
+        });
+    }
+
+    /**
+     * Get delegation information for a user acting on behalf of another user
+     */
+    private function getDelegationInfo(RequestModel $request, User $user): ?array
+    {
+        // Check if user is acting on behalf of someone for this specific request
+        $delegation = \App\Models\Delegation::where('delegate_id', $user->id)
+            ->where('is_active', true)
+            ->where(function ($query) use ($request) {
+                $query->whereNull('department_id')
+                    ->orWhere('department_id', $request->employee->department_id);
+            })
+            ->where(function ($query) {
+                $query->whereNull('starts_at')
+                    ->orWhere('starts_at', '<=', now());
+            })
+            ->where(function ($query) {
+                $query->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
+            ->where('delegation_type', 'approval')
+            ->with('delegator')
+            ->first();
+
+        if (!$delegation) {
+            return null;
+        }
+
+        return [
+            'original_approver' => $delegation->delegator->full_name,
+            'reason' => $delegation->reason,
+            'expires_at' => $delegation->expires_at,
+            'delegation_id' => $delegation->id
+        ];
     }
 }

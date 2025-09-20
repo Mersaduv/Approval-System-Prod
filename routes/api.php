@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Api\RequestController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\Admin\ApprovalRuleController;
@@ -9,6 +10,7 @@ use App\Http\Controllers\Api\Admin\DepartmentController;
 use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Admin\SystemSettingsController;
 use App\Http\Controllers\Api\WorkflowStepController;
+use App\Http\Controllers\Api\DelegationController;
 use App\Http\Controllers\ReportsController;
 
 /*
@@ -23,9 +25,13 @@ use App\Http\Controllers\ReportsController;
 */
 
 Route::middleware(['web', 'auth'])->get('/user', function (Request $request) {
+    $user = $request->user();
+    if ($user) {
+        $user->load('role');
+    }
     return response()->json([
         'success' => true,
-        'data' => $request->user()->load('role')
+        'data' => $user
     ]);
 });
 
@@ -40,6 +46,9 @@ Route::middleware(['web', 'auth'])->group(function () {
     // Request actions
     Route::post('/requests/{id}/approve', [RequestController::class, 'approve']);
     Route::post('/requests/{id}/reject', [RequestController::class, 'reject']);
+    Route::post('/requests/{id}/delay', [RequestController::class, 'delay']);
+    Route::post('/requests/{id}/bill-printing', [RequestController::class, 'billPrinting']);
+    Route::post('/requests/{id}/finance-approve-with-bill', [RequestController::class, 'financeApproveWithBill']);
     Route::post('/requests/{id}/procurement', [RequestController::class, 'updateProcurement']);
     Route::post('/requests/{id}/process-procurement', [RequestController::class, 'processProcurement']);
     Route::post('/requests/{id}/rollback', [RequestController::class, 'rollbackRequest']);
@@ -47,6 +56,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     // Pending approvals
     Route::get('/requests/pending/approvals', [RequestController::class, 'pendingApprovals']);
     Route::get('/requests/pending/procurement', [RequestController::class, 'pendingProcurement']);
+    Route::get('/requests/approved', [RequestController::class, 'approvedRequests']);
 
     // Procurement verification
     Route::get('/requests/pending/verification', [RequestController::class, 'pendingProcurementVerification']);
@@ -59,12 +69,27 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
     Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 
+    // Delegation routes
+    Route::get('/delegations', [DelegationController::class, 'index']);
+    Route::get('/delegations/my', [DelegationController::class, 'myDelegations']);
+    Route::get('/delegations/received', [DelegationController::class, 'receivedDelegations']);
+    Route::post('/delegations', [DelegationController::class, 'store']);
+    Route::put('/delegations/{id}', [DelegationController::class, 'update']);
+    Route::delete('/delegations/{id}', [DelegationController::class, 'destroy']);
+    Route::get('/delegations/available-users', [DelegationController::class, 'getAvailableUsers']);
+    Route::get('/delegations/workflow-steps', [DelegationController::class, 'getWorkflowSteps']);
+    Route::get('/delegations/stats', [DelegationController::class, 'getStats']);
+
     // Debug routes
     Route::get('/test-session', function () {
+        $user = Auth::user();
+        if ($user) {
+            $user->load('role');
+        }
         return response()->json([
             'success' => Auth::check(),
             'authenticated' => Auth::check(),
-            'user' => Auth::user() ? Auth::user()->load('role') : null,
+            'user' => $user,
             'session_id' => request()->session()->getId()
         ]);
     });

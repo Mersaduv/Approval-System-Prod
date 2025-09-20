@@ -26,6 +26,7 @@ export default function AppLayout({ children, title, auth }) {
         const baseNavigation = [
             { name: 'Dashboard', href: '/dashboard', icon: '🏠', current: title === 'Dashboard' },
             { name: 'Requests', href: '/requests', icon: '📄', current: title === 'Requests' },
+            { name: 'Delegations', href: '/delegations', icon: '🔄', current: title === 'Delegation Management' },
         ]
 
         // Debug logging
@@ -41,12 +42,7 @@ export default function AppLayout({ children, title, auth }) {
             )
         }
 
-        if (auth.user?.role?.name === 'procurement') {
-            console.log('Adding procurement navigation items')
-            baseNavigation.push(
-                { name: 'Procurement', href: '/procurement', icon: '📦', current: title === 'Procurement Management' }
-            )
-        }
+        // Procurement users now use the Requests page instead of separate Procurement page
 
         console.log('Final navigation:', baseNavigation)
         return baseNavigation

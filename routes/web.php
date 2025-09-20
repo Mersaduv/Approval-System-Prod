@@ -62,15 +62,6 @@ Route::middleware('auth')->group(function () {
             ]
         ]);
     });
-    Route::get('/procurement/requests/{id}', function ($id) {
-        return inertia('RequestView', [
-            'requestId' => $id,
-            'source' => 'procurement',
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    });
     Route::get('/notifications', function () {
         return inertia('Notifications', [
             'auth' => [
@@ -113,8 +104,8 @@ Route::middleware('auth')->group(function () {
             ]
         ]);
     });
-    Route::get('/procurement', function () {
-        return inertia('Procurement', [
+    Route::get('/delegations', function () {
+        return inertia('DelegationManagement', [
             'auth' => [
                 'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]

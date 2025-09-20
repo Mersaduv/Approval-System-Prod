@@ -106,8 +106,18 @@ function SortableStep({ step, onEdit, onDelete, getEntityName }) {
                             <span className="font-medium text-gray-700 text-sm">Assignments:</span>
                             <div className="flex flex-wrap gap-2 mt-1">
                                 {step.assignments.map((assignment, idx) => (
-                                    <span key={idx} className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">
+                                    <span
+                                        key={idx}
+                                        className={`px-2 py-1 rounded text-xs ${
+                                            assignment.is_required
+                                                ? 'bg-red-100 text-red-700 border border-red-200'
+                                                : 'bg-gray-100 text-gray-700'
+                                        }`}
+                                    >
                                         {getEntityName(assignment)}
+                                        {assignment.is_required && (
+                                            <span className="ml-1 font-semibold">*</span>
+                                        )}
                                     </span>
                                 ))}
                             </div>
@@ -171,7 +181,7 @@ export default function WorkflowSettings({ auth }) {
         is_active: true,
         step_type: 'approval',
         timeout_hours: null, // Unlimited by default
-        auto_approve_if_condition_met: false,
+        auto_approve: false,
         conditions: [],
         assignments: []
     })
@@ -229,9 +239,13 @@ export default function WorkflowSettings({ auth }) {
             is_active: true,
             step_type: 'approval',
             timeout_hours: null, // Unlimited by default
-            auto_approve_if_condition_met: false,
+            auto_approve: false,
             conditions: [],
-            assignments: []
+            assignments: [{
+                assignment_type: 'admin',
+                user_id: '',
+                is_required: true
+            }]
         })
         setShowModal(true)
     }
@@ -249,7 +263,7 @@ export default function WorkflowSettings({ auth }) {
                     is_active: step.is_active,
                     step_type: step.step_type,
                     timeout_hours: step.timeout_hours,
-                    auto_approve_if_condition_met: step.auto_approve_if_condition_met,
+                    auto_approve: step.auto_approve || false,
                     conditions: step.conditions || [],
                     assignments: (step.assignments || []).map(assignment => convertAssignmentToNewFormat(assignment))
                 })
@@ -263,7 +277,7 @@ export default function WorkflowSettings({ auth }) {
                 is_active: step.is_active,
                 step_type: step.step_type,
                 timeout_hours: step.timeout_hours,
-                auto_approve_if_condition_met: step.auto_approve_if_condition_met,
+                auto_approve: step.auto_approve || false,
                 conditions: step.conditions || [],
                 assignments: (step.assignments || []).map(assignment => convertAssignmentToNewFormat(assignment))
             })
@@ -272,6 +286,37 @@ export default function WorkflowSettings({ auth }) {
     }
 
     const handleSaveStep = async () => {
+        // Validation
+        if (!stepForm.name.trim()) {
+            showAlertMessage('Step name is required', 'error')
+            return
+        }
+
+        if (!stepForm.step_type) {
+            showAlertMessage('Step type is required', 'error')
+            return
+        }
+
+        if (!stepForm.auto_approve && (!stepForm.assignments || stepForm.assignments.length === 0)) {
+            showAlertMessage('At least one assignment is required when auto approve is disabled', 'error')
+            return
+        }
+
+        // Validate assignments only if auto_approve is false
+        if (!stepForm.auto_approve) {
+            for (let i = 0; i < stepForm.assignments.length; i++) {
+                const assignment = stepForm.assignments[i]
+                if (!assignment.assignment_type) {
+                    showAlertMessage(`Assignment ${i + 1}: Assignment type is required`, 'error')
+                    return
+                }
+                if ((assignment.assignment_type === 'user' || assignment.assignment_type === 'finance') && !assignment.user_id) {
+                    showAlertMessage(`Assignment ${i + 1}: User selection is required`, 'error')
+                    return
+                }
+            }
+        }
+
         try {
             const url = editingStep
                 ? `/api/admin/workflow-steps/${editingStep.id}`
@@ -306,10 +351,12 @@ export default function WorkflowSettings({ auth }) {
             if (response.data.success) {
                 showAlertMessage('Step deleted successfully', 'success')
                 fetchSteps()
+                setShowConfirm(false) // Close the confirmation modal
             }
         } catch (error) {
             console.error('Error deleting step:', error)
             showAlertMessage('Error deleting step', 'error')
+            setShowConfirm(false) // Close the confirmation modal even on error
         }
     }
 
@@ -406,8 +453,7 @@ export default function WorkflowSettings({ auth }) {
             assignments: [...prev.assignments, {
                 assignment_type: 'admin',
                 user_id: '',
-                is_required: true,
-                priority: 1
+                is_required: true
             }]
         }))
     }
@@ -436,6 +482,8 @@ export default function WorkflowSettings({ auth }) {
             case 'manager':
             case 'procurement':
                 return assignableEntities.roles.filter(role => role.name === type)
+            case 'finance':
+                return assignableEntities.users.filter(user => user.department_name === 'Finance')
             default:
                 return []
         }
@@ -446,15 +494,22 @@ export default function WorkflowSettings({ auth }) {
         let userId = '';
 
         if (assignment.assignment_type) {
-            // New structure
+            // New structure - backend already provides assignment_type and user_id
             assignmentType = assignment.assignment_type;
-            userId = assignment.user_id || '';
+            userId = assignment.user_id ? String(assignment.user_id) : '';
         } else if (assignment.assignable_type) {
             // Old structure - convert to new
             switch (assignment.assignable_type) {
                 case 'App\\Models\\User':
                     assignmentType = 'user';
-                    userId = assignment.assignable_id || '';
+                    userId = assignment.assignable_id ? String(assignment.assignable_id) : '';
+                    break;
+                case 'App\\Models\\FinanceAssignment':
+                    assignmentType = 'finance';
+                    // For FinanceAssignment, the user_id should already be provided by the backend
+                    // If not, we need to get it from the assignable relationship
+                    userId = assignment.user_id ? String(assignment.user_id) :
+                            (assignment.assignable && assignment.assignable.user_id) ? String(assignment.assignable.user_id) : '';
                     break;
                 case 'App\\Models\\Role':
                     // Find role name by ID
@@ -473,8 +528,7 @@ export default function WorkflowSettings({ auth }) {
             id: assignment.id,
             assignment_type: assignmentType,
             user_id: userId,
-            is_required: assignment.is_required,
-            priority: assignment.priority
+            is_required: assignment.is_required
         }
     }
 
@@ -488,6 +542,9 @@ export default function WorkflowSettings({ auth }) {
             if (assignment.assignment_type === 'user') {
                 const user = assignableEntities.users?.find(u => u.id == assignment.user_id)
                 return user ? user.name : 'Unknown User'
+            } else if (assignment.assignment_type === 'finance') {
+                const user = assignableEntities.users?.find(u => u.id == assignment.user_id)
+                return user ? `${user.name} (Finance)` : 'Unknown Finance User'
             } else {
                 return assignment.assignment_type.charAt(0).toUpperCase() + assignment.assignment_type.slice(1)
             }
@@ -499,6 +556,11 @@ export default function WorkflowSettings({ auth }) {
                 case 'App\\Models\\User':
                     const user = assignableEntities.users?.find(u => u.id == assignment.assignable_id)
                     return user ? user.name : 'Unknown User'
+                case 'App\\Models\\FinanceAssignment':
+                    // For old structure, get user_id from assignable relationship
+                    const financeUserId = assignment.user_id || (assignment.assignable && assignment.assignable.user_id);
+                    const financeUser = assignableEntities.users?.find(u => u.id == financeUserId)
+                    return financeUser ? `${financeUser.name} (Finance)` : 'Unknown Finance User'
                 case 'App\\Models\\Role':
                     const role = assignableEntities.roles?.find(r => r.id == assignment.assignable_id)
                     return role ? role.name : 'Unknown Role'
@@ -526,7 +588,6 @@ export default function WorkflowSettings({ auth }) {
     return (
         <AppLayout auth={auth}>
             <Head title="Workflow Settings" />
-
             <div className="py-12">
                 <div className="max-w-7xl mx-auto sm:px-6 lg:px-8">
                     <div className="bg-white overflow-hidden shadow-sm sm:rounded-lg">
@@ -611,13 +672,15 @@ export default function WorkflowSettings({ auth }) {
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
                                             Step Name *
                                         </label>
-                                        <input
-                                            type="text"
-                                            value={stepForm.name}
-                                            onChange={(e) => setStepForm(prev => ({ ...prev, name: e.target.value }))}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            placeholder="e.g., Manager Approval"
-                                        />
+                                        <div className="flex gap-3">
+                                            <input
+                                                type="text"
+                                                value={stepForm.name}
+                                                onChange={(e) => setStepForm(prev => ({ ...prev, name: e.target.value }))}
+                                                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                placeholder="e.g., Manager Approval"
+                                            />
+                                        </div>
                                     </div>
 
                                     <div>
@@ -648,7 +711,23 @@ export default function WorkflowSettings({ auth }) {
                                         placeholder="Step description..."
                                     />
                                 </div>
-
+                                <div className="checkbox-container">
+                                                <div className="custom-checkbox">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="is_active"
+                                                        checked={stepForm.is_active}
+                                                        onChange={(e) => setStepForm(prev => ({ ...prev, is_active: e.target.checked }))}
+                                                    />
+                                                    <span className="checkmark"></span>
+                                                </div>
+                                                <label
+                                                    htmlFor="is_active"
+                                                    className="checkbox-label whitespace-nowrap"
+                                                >
+                                                    Active
+                                                </label>
+                                            </div>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -704,42 +783,6 @@ export default function WorkflowSettings({ auth }) {
                                         )}
                                     </div>
 
-                                    <div className="checkbox-group">
-                                        <div className="checkbox-container">
-                                            <div className="custom-checkbox">
-                                                <input
-                                                    type="checkbox"
-                                                    id="is_active"
-                                                    checked={stepForm.is_active}
-                                                    onChange={(e) => setStepForm(prev => ({ ...prev, is_active: e.target.checked }))}
-                                                />
-                                                <span className="checkmark"></span>
-                                            </div>
-                                            <label
-                                                htmlFor="is_active"
-                                                className="checkbox-label"
-                                            >
-                                                Active Step
-                                            </label>
-                                        </div>
-                                        <div className="checkbox-container">
-                                            <div className="custom-checkbox">
-                                                <input
-                                                    type="checkbox"
-                                                    id="auto_approve"
-                                                    checked={stepForm.auto_approve_if_condition_met}
-                                                    onChange={(e) => setStepForm(prev => ({ ...prev, auto_approve_if_condition_met: e.target.checked }))}
-                                                />
-                                                <span className="checkmark"></span>
-                                            </div>
-                                            <label
-                                                htmlFor="auto_approve"
-                                                className="checkbox-label"
-                                            >
-                                                Auto-approve if conditions are met
-                                            </label>
-                                        </div>
-                                    </div>
                                 </div>
 
                                 {/* Conditions Section */}
@@ -859,27 +902,76 @@ export default function WorkflowSettings({ auth }) {
                                 {/* Assignments Section */}
                                 <div>
                                     <div className="flex justify-between items-center mb-2">
-                                        <label className="block text-sm font-medium text-gray-700">
-                                            Assignments
-                                        </label>
+                                        <div className="flex items-center gap-4">
+                                            <label className="block text-sm font-medium text-gray-700">
+                                                Assignments {!stepForm.auto_approve && <span className="text-red-500">*</span>}
+                                            </label>
+                                            <div className="checkbox-container">
+                                                <div className="custom-checkbox">
+                                                    <input
+                                                        type="checkbox"
+                                                        id="auto_approve"
+                                                        checked={stepForm.auto_approve}
+                                                        onChange={(e) => setStepForm(prev => ({
+                                                            ...prev,
+                                                            auto_approve: e.target.checked,
+                                                            assignments: e.target.checked ? [] : prev.assignments
+                                                        }))}
+                                                    />
+                                                    <span className="checkmark"></span>
+                                                </div>
+                                                <label
+                                                    htmlFor="auto_approve"
+                                                    className="checkbox-label"
+                                                >
+                                                    Auto Approve
+                                                </label>
+                                            </div>
+                                        </div>
                                         <button
                                             type="button"
                                             onClick={addAssignment}
                                             className="text-blue-600 hover:text-blue-800 text-sm"
+                                            disabled={stepForm.auto_approve}
                                         >
                                             + Add Assignment
                                         </button>
                                     </div>
 
-                                    {stepForm.assignments.map((assignment, index) => (
+                                    {stepForm.auto_approve ? (
+                                        <div className="text-center py-4 text-gray-500 text-sm border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
+                                            <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <p className="font-medium">Auto Approve Enabled</p>
+                                            <p className="text-xs mt-1">This step will be automatically approved without requiring manual intervention.</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            {(!stepForm.assignments || stepForm.assignments.length === 0) && (
+                                                <div className="text-center py-4 text-gray-500 text-sm border-2 border-dashed border-gray-300 rounded-lg">
+                                                    <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                    </svg>
+                                                    <p>No assignments defined</p>
+                                                    <p className="text-xs mt-1">Click "Add Assignment" to assign users/roles to this step.</p>
+                                                </div>
+                                            )}
+
+                                            {stepForm.assignments.map((assignment, index) => (
                                         <div key={index} className="flex gap-2 mb-2">
                                             <select
                                                 value={assignment.assignment_type}
                                                 onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
-                                                className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                    !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                }`}
+                                                required
                                             >
+                                                <option value="">Select Assignment Type *</option>
                                                 <option value="admin">Admin</option>
                                                 <option value="manager">Manager</option>
+                                                <option value="finance">Finance</option>
                                                 <option value="procurement">Procurement</option>
                                                 <option value="user">User</option>
                                             </select>
@@ -888,9 +980,12 @@ export default function WorkflowSettings({ auth }) {
                                                 <select
                                                     value={assignment.user_id}
                                                     onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                    }`}
+                                                    required
                                                 >
-                                                    <option value="">Select User...</option>
+                                                    <option value="">Select User *</option>
                                                     {assignableEntities.users.map(user => (
                                                         <option key={user.id} value={user.id}>
                                                             {user.name} ({user.email})
@@ -899,14 +994,26 @@ export default function WorkflowSettings({ auth }) {
                                                 </select>
                                             )}
 
-                                            <input
-                                                type="number"
-                                                value={assignment.priority}
-                                                onChange={(e) => updateAssignment(index, 'priority', parseInt(e.target.value))}
-                                                className="w-20 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                placeholder="Priority"
-                                                min="1"
-                                            />
+                                            {assignment.assignment_type === 'finance' && (
+                                                <select
+                                                    value={assignment.user_id}
+                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                    className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                    }`}
+                                                    required
+                                                >
+                                                    <option value="">Select Finance User *</option>
+                                                    {assignableEntities.users
+                                                        .filter(user => user.department_name === 'Finance')
+                                                        .map(user => (
+                                                            <option key={user.id} value={user.id}>
+                                                                {user.name} ({user.email})
+                                                            </option>
+                                                        ))}
+                                                </select>
+                                            )}
+
 
                                             <div className="checkbox-container assignment-checkbox">
                                                 <div className="custom-checkbox">
@@ -937,6 +1044,8 @@ export default function WorkflowSettings({ auth }) {
                                             </button>
                                         </div>
                                     ))}
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
@@ -967,11 +1076,14 @@ export default function WorkflowSettings({ auth }) {
             />
 
             <ConfirmationModal
-                show={showConfirm}
+                isOpen={showConfirm}
                 onClose={() => setShowConfirm(false)}
                 onConfirm={confirmAction}
                 title="Confirm Delete"
                 message="Are you sure you want to delete this step?"
+                type="danger"
+                confirmText="Delete"
+                cancelText="Cancel"
             />
         </AppLayout>
     )

@@ -20,12 +20,20 @@ class Request extends Model
         'procurement_notes',
         'verified_by',
         'verified_at',
+        'bill_number',
+        'bill_printed_at',
+        'bill_printed_by',
+        'bill_notes',
+        'bill_amount',
+        'bill_status',
     ];
 
     protected $casts = [
         'amount' => 'decimal:2',
         'final_price' => 'decimal:2',
         'verified_at' => 'datetime',
+        'bill_printed_at' => 'datetime',
+        'bill_amount' => 'decimal:2',
     ];
 
     public function employee()
@@ -40,7 +48,7 @@ class Request extends Model
 
     public function auditLogs()
     {
-        return $this->hasMany(AuditLog::class);
+        return $this->hasMany(AuditLog::class, 'request_id');
     }
 
     public function procurement()
@@ -51,5 +59,10 @@ class Request extends Model
     public function verifiedBy()
     {
         return $this->belongsTo(User::class, 'verified_by');
+    }
+
+    public function billPrintedBy()
+    {
+        return $this->belongsTo(User::class, 'bill_printed_by');
     }
 }

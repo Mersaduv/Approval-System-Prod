@@ -110,11 +110,7 @@ export default function Settings({ auth }) {
     const [departmentErrors, setDepartmentErrors] = useState({})
     const [submitting, setSubmitting] = useState(false)
     const [settings, setSettings] = useState({
-        emailNotifications: true,
-        approvalThreshold: 1000,
-        managerOnlyThreshold: 2000,
-        ceoApprovalThreshold: 5000,
-        managerApprovalRequired: true
+        emailNotifications: true
     })
     const [settingsLoading, setSettingsLoading] = useState(true)
     const [settingsSaving, setSettingsSaving] = useState(false)
@@ -162,11 +158,7 @@ export default function Settings({ auth }) {
             if (response.data.success) {
                 const settingsData = response.data.data
                 setSettings({
-                    emailNotifications: settingsData.email_notifications_enabled || true,
-                    approvalThreshold: settingsData.auto_approval_threshold || 1000,
-                    managerOnlyThreshold: settingsData.manager_only_threshold || 2000,
-                    ceoApprovalThreshold: settingsData.ceo_approval_threshold || 5000,
-                    managerApprovalRequired: settingsData.manager_approval_required !== false
+                    emailNotifications: settingsData.email_notifications_enabled || true
                 })
             }
         } catch (error) {
@@ -331,11 +323,7 @@ export default function Settings({ auth }) {
             setSettingsSaving(true)
 
             const settingsToSave = [
-                { key: 'email_notifications_enabled', value: settings.emailNotifications, type: 'boolean' },
-                { key: 'auto_approval_threshold', value: settings.approvalThreshold, type: 'number' },
-                { key: 'manager_only_threshold', value: settings.managerOnlyThreshold, type: 'number' },
-                { key: 'ceo_approval_threshold', value: settings.ceoApprovalThreshold, type: 'number' },
-                { key: 'manager_approval_required', value: settings.managerApprovalRequired, type: 'boolean' }
+                { key: 'email_notifications_enabled', value: settings.emailNotifications, type: 'boolean' }
             ]
 
             const response = await axios.put('/api/admin/settings', {
@@ -427,74 +415,6 @@ export default function Settings({ auth }) {
                                     </div>
                                 </div>
 
-                                {/* Approval Workflow Section */}
-                                <div>
-                                    <h4 className="text-md font-medium text-gray-900 mb-4">Approval Workflow</h4>
-                                    <div className="space-y-6">
-
-                                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
-                                            <div>
-                                                <label htmlFor="approvalThreshold" className="block text-sm font-medium text-gray-700">
-                                                    Auto-approval Threshold (AFN)
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    id="approvalThreshold"
-                                                    name="approvalThreshold"
-                                                    value={settings.approvalThreshold}
-                                                    onChange={handleSettingsChange}
-                                                    min="0"
-                                                    step="100"
-                                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                                    placeholder="1000"
-                                                />
-                                                <p className="mt-1 text-xs text-gray-500">
-                                                    Auto-approve requests below this amount
-                                                </p>
-                                            </div>
-
-                                            <div>
-                                                <label htmlFor="managerOnlyThreshold" className="block text-sm font-medium text-gray-700">
-                                                    Manager-Only Threshold (AFN) *
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    id="managerOnlyThreshold"
-                                                    name="managerOnlyThreshold"
-                                                    value={settings.managerOnlyThreshold}
-                                                    onChange={handleSettingsChange}
-                                                    min="0"
-                                                    step="100"
-                                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                                    placeholder="2000"
-                                                />
-                                                <p className="mt-1 text-xs text-gray-500">
-                                                    Manager approval only (no admin required)
-                                                </p>
-                                            </div>
-
-                                            <div>
-                                                <label htmlFor="ceoApprovalThreshold" className="block text-sm font-medium text-gray-700">
-                                                    CEO Approval Threshold (AFN) *
-                                                </label>
-                                                <input
-                                                    type="number"
-                                                    id="ceoApprovalThreshold"
-                                                    name="ceoApprovalThreshold"
-                                                    value={settings.ceoApprovalThreshold}
-                                                    onChange={handleSettingsChange}
-                                                    min="0"
-                                                    step="100"
-                                                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                                                    placeholder="5000"
-                                                />
-                                                <p className="mt-1 text-xs text-gray-500">
-                                                    Requires both manager and CEO approval
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
 
                                 <div className="flex justify-end">
                                     <button
