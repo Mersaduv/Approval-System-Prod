@@ -160,8 +160,9 @@ class WorkflowService
         $processed = false;
         $nextStep = null;
 
-        // Check if the request creator is admin
-        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+        // Check if the request creator is admin or procurement
+        $isAdminRequest = $request->employee && $request->employee->role &&
+            in_array($request->employee->role->name, ['admin', 'procurement']);
 
         // Get all steps including auto approve steps for processing
         $allSteps = WorkflowStep::getAllStepsForRequest($request);
@@ -494,12 +495,30 @@ class WorkflowService
     public function hasUserApprovedStep(RequestModel $request, User $user, WorkflowStep $step): bool
     {
         // Check for specific step approval - look for the actual log pattern used
-        return AuditLog::where('request_id', $request->id)
+        $userApproval = AuditLog::where('request_id', $request->id)
             ->where('user_id', $user->id)
             ->where('action', 'Workflow Step Completed')
             ->where('notes', 'like', '%' . $step->name . '%')
             ->where('notes', 'like', '%approved%')
             ->exists();
+
+        if ($userApproval) {
+            return true;
+        }
+
+        // Also check for system user (999) approvals for admin users (due to logAction method behavior)
+        if ($user->id === 1) { // Admin user
+            $systemApproval = AuditLog::where('request_id', $request->id)
+                ->where('user_id', 999) // System user
+                ->where('action', 'Workflow Step Completed')
+                ->where('notes', 'like', '%' . $step->name . '%')
+                ->where('notes', 'like', '%approved%')
+                ->exists();
+
+            return $systemApproval;
+        }
+
+        return false;
     }
 
     /**
@@ -1531,7 +1550,7 @@ class WorkflowService
     /**
      * Get effective approvers considering delegations
      */
-    private function getEffectiveApprovers(RequestModel $request, WorkflowStep $step): \Illuminate\Database\Eloquent\Collection
+    private function getEffectiveApprovers(RequestModel $request, WorkflowStep $step): \Illuminate\Support\Collection
     {
         // Get original approvers from workflow step assignments
         $originalApprovers = $step->getAssignedUsers($request);
@@ -1568,7 +1587,7 @@ class WorkflowService
                     $query->whereNull('expires_at')
                         ->orWhere('expires_at', '>', now());
                 })
-                ->whereIn('delegation_type', $delegationTypes)
+                // Removed delegation_type filter since it's no longer used
                 ->get();
 
             if ($activeDelegations->isNotEmpty()) {
@@ -1617,7 +1636,61 @@ class WorkflowService
                 $query->whereNull('expires_at')
                     ->orWhere('expires_at', '>', now());
             })
-            ->where('delegation_type', 'approval')
+            // Removed delegation_type filter since it's no longer used
             ->exists();
+    }
+
+    /**
+     * Get current workflow step for a request
+     */
+    private function getCurrentWorkflowStep(RequestModel $request): ?WorkflowStep
+    {
+        // Determine current step based on request status
+        switch ($request->status) {
+            case 'Pending':
+                // For pending requests, find the first step that needs approval
+                return WorkflowStep::where('is_active', true)
+                    ->where('step_type', 'approval')
+                    ->orderBy('order_index')
+                    ->first();
+
+            case 'Approved':
+                // For approved requests, find verification step
+                return WorkflowStep::where('is_active', true)
+                    ->where('step_type', 'verification')
+                    ->orderBy('order_index')
+                    ->first();
+
+            case 'Procurement':
+                // For procurement requests, find procurement step
+                return WorkflowStep::where('is_active', true)
+                    ->where('step_type', 'procurement')
+                    ->orderBy('order_index')
+                    ->first();
+
+            default:
+                // Fallback to first active step
+                return WorkflowStep::where('is_active', true)
+                    ->orderBy('order_index')
+                    ->first();
+        }
+    }
+
+    /**
+     * Check if user can approve a specific request (including delegations)
+     */
+    public function canUserApproveRequest(RequestModel $request, User $user): bool
+    {
+        // Get current workflow step for this request
+        $currentStep = $this->getCurrentWorkflowStep($request);
+        if (!$currentStep) {
+            return false;
+        }
+
+        // Get effective approvers for this step (including delegations)
+        $effectiveApprovers = $this->getEffectiveApprovers($request, $currentStep);
+
+        // Check if user is in the effective approvers list
+        return $effectiveApprovers->contains('id', $user->id);
     }
 }

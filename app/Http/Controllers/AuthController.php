@@ -42,7 +42,7 @@ class AuthController extends Controller
             ]);
 
             // Return Inertia response for SPA
-            return redirect()->intended('/dashboard');
+            return redirect()->intended('/');
         }
 
         // Debug: Log failed authentication

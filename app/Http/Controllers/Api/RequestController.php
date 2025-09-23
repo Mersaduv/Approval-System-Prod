@@ -85,6 +85,55 @@ class RequestController extends Controller
                         });
                     });
                 } else {
+                    // For managers in 'my-requests' tab, show requests they can approve (including delegated ones)
+                    $query->where(function($q) use ($user) {
+                        // Show requests from their own department
+                        $q->whereHas('employee', function($empQuery) use ($user) {
+                            $empQuery->where('department_id', $user->department_id);
+                        })
+                        // OR show requests assigned to their department in workflow steps
+                        ->orWhere(function($workflowQuery) use ($user) {
+                            $workflowQuery->whereExists(function($subQuery) use ($user) {
+                                $subQuery->select(DB::raw(1))
+                                    ->from('workflow_steps')
+                                    ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                    ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
+                                    ->where('workflow_step_assignments.assignable_id', $user->department_id)
+                                    ->where('workflow_steps.is_active', true);
+                            });
+                        })
+                        // OR show requests assigned to them personally in workflow steps
+                        ->orWhere(function($personalQuery) use ($user) {
+                            $personalQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
+                                ->whereExists(function($subQuery) use ($user) {
+                                    $subQuery->select(DB::raw(1))
+                                        ->from('workflow_steps')
+                                        ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                        ->where('workflow_steps.is_active', true)
+                                        ->where(function($assignmentQuery) use ($user) {
+                                            $assignmentQuery->where(function($userQuery) use ($user) {
+                                                $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                    ->where('workflow_step_assignments.assignable_id', $user->id);
+                                            })
+                                            ->orWhere(function($roleQuery) use ($user) {
+                                                $roleQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\Role')
+                                                    ->where('workflow_step_assignments.assignable_id', $user->role_id);
+                                            })
+                                            ->orWhere(function($financeQuery) use ($user) {
+                                                $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
+                                                    ->whereExists(function($financeSubQuery) use ($user) {
+                                                        $financeSubQuery->select(DB::raw(1))
+                                                            ->from('finance_assignments')
+                                                            ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                                                            ->where('finance_assignments.user_id', $user->id)
+                                                            ->where('finance_assignments.is_active', true);
+                                                    });
+                                            });
+                                        });
+                                });
+                        });
+                    });
+
                     // Check if this is a Finance user (has FinanceAssignment)
                     $isFinanceUser = \App\Models\FinanceAssignment::where('user_id', $user->id)
                         ->where('is_active', true)
@@ -235,6 +284,9 @@ class RequestController extends Controller
                 }
                 break;
         }
+
+        // Add delegation-based filtering for all users
+        $this->addDelegationFilter($query, $user);
 
         // Apply filters
         if ($request->has('status')) {
@@ -1036,11 +1088,11 @@ class RequestController extends Controller
         $query = RequestModel::with(['employee', 'employee.department'])
             ->where('status', 'Pending');
 
-        // Filter based on user role and department
+        // Get requests where user is directly assigned
         switch ($user->role->name) {
             case 'manager':
-                $query->whereHas('employee', function($q) use ($user) {
-                    $q->where('department_id', $user->department_id);
+                $query->whereHas('employee', function($empQuery) use ($user) {
+                    $empQuery->where('department_id', $user->department_id);
                 });
                 break;
             case 'admin':
@@ -1055,9 +1107,20 @@ class RequestController extends Controller
 
         $requests = $query->orderBy('created_at', 'asc')->get();
 
+        // Filter requests based on delegation
+        $filteredRequests = $requests->filter(function($request) use ($user) {
+            // Check if user can approve this request (including delegations)
+            return $this->workflowService->canUserApproveRequest($request, $user);
+        });
+
+        // Add delegation info to each request
+        foreach ($filteredRequests as $request) {
+            $request->delegation_info = $this->getDelegationInfo($request, $user);
+        }
+
         return response()->json([
             'success' => true,
-            'data' => $requests
+            'data' => $filteredRequests->values()
         ]);
     }
 
@@ -2123,6 +2186,11 @@ class RequestController extends Controller
             return true;
         }
 
+        // Check if user has delegation access to this request
+        if ($this->hasDelegationAccess($request, $user)) {
+            return true;
+        }
+
         switch ($user->role->name) {
             case 'employee':
                 return $request->employee_id === $user->id;
@@ -2243,6 +2311,82 @@ class RequestController extends Controller
             default:
                 return false;
         }
+    }
+
+    /**
+     * Check if user has delegation access to a request
+     */
+    private function hasDelegationAccess(RequestModel $request, User $user): bool
+    {
+        // Get active delegations for this user
+        $activeDelegations = \App\Models\Delegation::where('delegate_id', $user->id)
+            ->where('is_active', true)
+            ->where(function($delegationTimeQuery) {
+                $delegationTimeQuery->whereNull('starts_at')
+                    ->orWhere('starts_at', '<=', now());
+            })
+            ->where(function($delegationExpiryQuery) {
+                $delegationExpiryQuery->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
+            // Removed delegation_type filter since it's no longer used
+            ->with('delegator')
+            ->get();
+
+        if ($activeDelegations->isEmpty()) {
+            return false;
+        }
+
+        foreach ($activeDelegations as $delegation) {
+            // Check if request is from the delegator's department
+            if ($request->employee->department_id !== $delegation->delegator->department_id) {
+                continue;
+            }
+
+            // Check if request was created after delegation starts
+            if ($request->created_at < ($delegation->starts_at ?: $delegation->created_at)) {
+                continue;
+            }
+
+            // Check if request is in the delegated workflow step
+            if ($this->isRequestInDelegatedWorkflowStep($request, $delegation)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if request is in the delegated workflow step
+     */
+    private function isRequestInDelegatedWorkflowStep(RequestModel $request, \App\Models\Delegation $delegation): bool
+    {
+        // Get all workflow steps for this request
+        $workflowSteps = \App\Models\WorkflowStep::getStepsForRequest($request);
+
+        // Find the delegated step
+        $delegatedStep = null;
+        foreach ($workflowSteps as $step) {
+            if ($step->id === $delegation->workflow_step_id) {
+                $delegatedStep = $step;
+                break;
+            }
+        }
+
+        if (!$delegatedStep) {
+            return false;
+        }
+
+        // Check if the delegator would normally be assigned to this step
+        $assignments = $delegatedStep->assignments;
+        foreach ($assignments as $assignment) {
+            if ($this->isUserAssignedToStep($assignment, $delegation->delegator)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -2505,7 +2649,7 @@ class RequestController extends Controller
                 $query->whereNull('expires_at')
                     ->orWhere('expires_at', '>', now());
             })
-            ->where('delegation_type', 'approval')
+            // Removed delegation_type filter since it's no longer used
             ->with('delegator')
             ->first();
 
@@ -2519,5 +2663,67 @@ class RequestController extends Controller
             'expires_at' => $delegation->expires_at,
             'delegation_id' => $delegation->id
         ];
+    }
+
+    /**
+     * Add delegation-based filtering to the query
+     */
+    private function addDelegationFilter($query, User $user)
+    {
+        // Get active delegations for this user
+        $activeDelegations = \App\Models\Delegation::where('delegate_id', $user->id)
+            ->where('is_active', true)
+            ->where(function($delegationTimeQuery) {
+                $delegationTimeQuery->whereNull('starts_at')
+                    ->orWhere('starts_at', '<=', now());
+            })
+            ->where(function($delegationExpiryQuery) {
+                $delegationExpiryQuery->whereNull('expires_at')
+                    ->orWhere('expires_at', '>', now());
+            })
+            // Removed delegation_type filter since it's no longer used
+            ->with('delegator')
+            ->get();
+
+        if ($activeDelegations->isNotEmpty()) {
+            // Add requests that are delegated to this user
+            $query->orWhere(function($delegationQuery) use ($user, $activeDelegations) {
+                $delegationQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered'])
+                    ->where(function($delegationSubQuery) use ($activeDelegations) {
+                        foreach ($activeDelegations as $delegation) {
+                            $delegationSubQuery->orWhere(function($specificDelegationQuery) use ($delegation) {
+                                // Only show requests from the delegator's department
+                                $specificDelegationQuery->whereHas('employee', function($empQuery) use ($delegation) {
+                                    $empQuery->where('department_id', $delegation->delegator->department_id);
+                                })
+                                // AND that are created AFTER the delegation starts
+                                ->where('created_at', '>=', $delegation->starts_at ?: $delegation->created_at)
+                                // AND that are in the specific workflow step
+                                ->whereExists(function($workflowQuery) use ($delegation) {
+                                    $workflowQuery->select(DB::raw(1))
+                                        ->from('workflow_steps')
+                                        ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                        ->where('workflow_steps.id', $delegation->workflow_step_id)
+                                        ->where('workflow_steps.is_active', true)
+                                        ->where(function($assignmentQuery) use ($delegation) {
+                                            $assignmentQuery->where(function($userQuery) use ($delegation) {
+                                                $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                    ->where('workflow_step_assignments.assignable_id', $delegation->delegator_id);
+                                            })
+                                            ->orWhere(function($roleQuery) use ($delegation) {
+                                                $roleQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\Role')
+                                                    ->where('workflow_step_assignments.assignable_id', $delegation->delegator->role_id);
+                                            })
+                                            ->orWhere(function($departmentQuery) use ($delegation) {
+                                                $departmentQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
+                                                    ->where('workflow_step_assignments.assignable_id', $delegation->delegator->department_id);
+                                            });
+                                        });
+                                });
+                            });
+                        }
+                    });
+            });
+        }
     }
 }

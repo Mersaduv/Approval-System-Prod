@@ -24,7 +24,7 @@ export default function AppLayout({ children, title, auth }) {
 
     const getNavigation = () => {
         const baseNavigation = [
-            { name: 'Dashboard', href: '/dashboard', icon: '🏠', current: title === 'Dashboard' },
+            { name: 'Dashboard', href: '/', icon: '🏠', current: title === 'Home' },
             { name: 'Requests', href: '/requests', icon: '📄', current: title === 'Requests' },
             { name: 'Delegations', href: '/delegations', icon: '🔄', current: title === 'Delegation Management' },
         ]

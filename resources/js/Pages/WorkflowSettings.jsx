@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import AlertModal from '../Components/AlertModal'
 import ConfirmationModal from '../Components/ConfirmationModal'
+import { CardSkeleton, WorkflowStepSkeleton } from '../Components/SkeletonLoader'
 import {
     DndContext,
     closestCenter,
@@ -575,15 +576,7 @@ export default function WorkflowSettings({ auth }) {
         return 'Unknown Assignment'
     }
 
-    if (loading) {
-        return (
-            <AppLayout auth={auth}>
-                <div className="flex justify-center items-center h-64">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                </div>
-            </AppLayout>
-        )
-    }
+    // Remove full page loading - we'll show skeleton loading instead
 
     return (
         <AppLayout auth={auth}>
@@ -622,32 +615,44 @@ export default function WorkflowSettings({ auth }) {
                                     strategy={verticalListSortingStrategy}
                                 >
                                     <div className="space-y-4">
-                                        {isReordering && (
-                                            <div className="flex items-center justify-center py-2">
-                                                <div className="flex items-center gap-2 text-blue-600">
-                                                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                                    <span className="text-sm">Reordering steps...</span>
-                                                </div>
-                                            </div>
-                                        )}
-                                        {steps.map((step) => (
-                                            <SortableStep
-                                                key={step.id}
-                                                step={step}
-                                                onEdit={handleEditStep}
-                                                onDelete={handleDeleteStep}
-                                                getEntityName={getEntityName}
-                                            />
-                                        ))}
+                                        {loading ? (
+                                            <>
+                                                <WorkflowStepSkeleton />
+                                                <WorkflowStepSkeleton />
+                                                <WorkflowStepSkeleton />
+                                                <WorkflowStepSkeleton />
+                                                <WorkflowStepSkeleton />
+                                            </>
+                                        ) : (
+                                            <>
+                                                {isReordering && (
+                                                    <div className="flex items-center justify-center py-2">
+                                                        <div className="flex items-center gap-2 text-blue-600">
+                                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                                            <span className="text-sm">Reordering steps...</span>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {steps.map((step) => (
+                                                    <SortableStep
+                                                        key={step.id}
+                                                        step={step}
+                                                        onEdit={handleEditStep}
+                                                        onDelete={handleDeleteStep}
+                                                        getEntityName={getEntityName}
+                                                    />
+                                                ))}
 
-                                        {steps.length === 0 && (
-                                            <div className="text-center py-12">
-                                                <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                                                </svg>
-                                                <h3 className="mt-2 text-sm font-medium text-gray-900">No workflow steps defined</h3>
-                                                <p className="mt-1 text-sm text-gray-500">Start by adding a new step.</p>
-                                            </div>
+                                                {steps.length === 0 && (
+                                                    <div className="text-center py-12">
+                                                        <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                                                        </svg>
+                                                        <h3 className="mt-2 text-sm font-medium text-gray-900">No workflow steps defined</h3>
+                                                        <p className="mt-1 text-sm text-gray-500">Start by adding a new step.</p>
+                                                    </div>
+                                                )}
+                                            </>
                                         )}
                                     </div>
                                 </SortableContext>

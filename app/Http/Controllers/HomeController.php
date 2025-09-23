@@ -17,21 +17,4 @@ class HomeController extends Controller
         ]);
     }
 
-    public function dashboard()
-    {
-        return Inertia::render('Dashboard', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    }
-
-    public function test()
-    {
-        return Inertia::render('Test', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    }
 }

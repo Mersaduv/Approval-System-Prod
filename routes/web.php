@@ -29,8 +29,6 @@ Route::middleware('auth')->group(function () {
 
     // Protected Routes
     Route::get('/', [HomeController::class, 'index'])->name('home');
-    Route::get('/dashboard', [HomeController::class, 'dashboard'])->name('dashboard');
-    Route::get('/test', [HomeController::class, 'test']);
     Route::get('/test-tailwind', function () {
         return view('test-tailwind');
     });
@@ -76,13 +74,6 @@ Route::middleware('auth')->group(function () {
             ]
         ]);
     });
-    Route::get('/workflow-demo', function () {
-        return inertia('WorkflowDemo', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    });
     Route::get('/users', function () {
         return inertia('Users', [
             'auth' => [
@@ -119,22 +110,6 @@ Route::middleware('auth')->group(function () {
         ]);
     });
 
-    // Debug routes
-    Route::get('/debug-auth', function () {
-        return inertia('DebugAuth', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    });
-
-    Route::get('/session-test', function () {
-        return inertia('SessionTest', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    });
 
 });
 

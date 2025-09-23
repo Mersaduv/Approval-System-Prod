@@ -2,6 +2,7 @@ import { Head, Link, router } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
+import { TableRowSkeleton, CardSkeleton } from '../Components/SkeletonLoader'
 
 export default function Requests({ auth }) {
     const [requests, setRequests] = useState([])
@@ -133,15 +134,7 @@ export default function Requests({ auth }) {
         return status;
     }
 
-    if (loading) {
-        return (
-            <AppLayout title="Requests" auth={auth}>
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                </div>
-            </AppLayout>
-        )
-    }
+    // Remove the full page loading - we'll show skeleton loading instead
 
     const getPageTitle = () => {
         const user = auth.user
@@ -169,48 +162,48 @@ export default function Requests({ auth }) {
                 </div>
                 {/* Search, Filter and New Request */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                            <div className="flex-1 max-w-md">
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                        </svg>
-                                    </div>
-                                    <input
-                                        type="text"
-                                        placeholder="Search requests..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                                    />
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                        <div className="flex-1 max-w-md">
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <svg className="h-5 w-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                    </svg>
                                 </div>
+                                <input
+                                    type="text"
+                                    placeholder="Search requests..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                                />
                             </div>
-                            <select
-                                value={statusFilter}
-                                onChange={(e) => setStatusFilter(e.target.value)}
-                                className="block w-full sm:w-40 px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                            >
-                                <option value="all">All Status</option>
-                                <option value="Pending Procurement Verification">Pending Verification</option>
-                                <option value="Pending Approval">Pending Approval</option>
-                                <option value="Approved">Approved</option>
-                                <option value="Rejected">Rejected</option>
-                                <option value="Delayed">Delayed</option>
-                                <option value="Ordered">Ordered</option>
-                                <option value="Delivered">Delivered</option>
-                                <option value="Cancelled">Cancelled</option>
-                            </select>
                         </div>
-                        {canSubmitRequest() && (
-                            <Link
-                                href="/requests/new"
-                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-center sm:text-left"
-                            >
-                                New Request
-                            </Link>
-                        )}
+                        <select
+                            value={statusFilter}
+                            onChange={(e) => setStatusFilter(e.target.value)}
+                            className="block w-full sm:w-40 px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        >
+                            <option value="all">All Status</option>
+                            <option value="Pending Procurement Verification">Pending Verification</option>
+                            <option value="Pending Approval">Pending Approval</option>
+                            <option value="Approved">Approved</option>
+                            <option value="Rejected">Rejected</option>
+                            <option value="Delayed">Delayed</option>
+                            <option value="Ordered">Ordered</option>
+                            <option value="Delivered">Delivered</option>
+                            <option value="Cancelled">Cancelled</option>
+                        </select>
                     </div>
+                    {canSubmitRequest() && (
+                        <Link
+                            href="/requests/new"
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-center sm:text-left"
+                        >
+                            New Request
+                        </Link>
+                    )}
+                </div>
 
                 {/* Tabs */}
                 <div className="tab-container">
@@ -268,95 +261,103 @@ export default function Requests({ auth }) {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {filteredRequests.map((request) => (
-                                    <tr key={request.id} className="hover:bg-gray-50">
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                            #{request.id}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {request.employee?.full_name || 'N/A'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {request.employee?.department?.name || 'N/A'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            <div className="max-w-xs truncate" title={request.item}>
-                                                {request.item}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                            {parseFloat(request.amount).toFixed(2)} AFN
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap">
-                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
-                                                {getStatusDisplayText(request.status, request)}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {new Date(request.created_at).toLocaleDateString()}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                            <Link
-                                                href={`/requests/${request.id}`}
-                                                className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs"
-                                            >
-                                                View
-                                            </Link>
-                                        </td>
-                                    </tr>
-                                ))}
+                                {loading ? (
+                                    <TableRowSkeleton columns={8} rows={8} />
+                                ) : (
+                                    filteredRequests.map((request) => (
+                                        <tr key={request.id} className="hover:bg-gray-50">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                #{request.id}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                {request.employee?.full_name || 'N/A'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {request.employee?.department?.name || 'N/A'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                <div className="max-w-xs truncate" title={request.item}>
+                                                    {request.item}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                {parseFloat(request.amount).toFixed(2)} AFN
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
+                                                    {getStatusDisplayText(request.status, request)}
+                                                </span>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {new Date(request.created_at).toLocaleDateString()}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                <Link
+                                                    href={`/requests/${request.id}`}
+                                                    className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs"
+                                                >
+                                                    View
+                                                </Link>
+                                            </td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
 
                     {/* Requests Cards - Mobile */}
                     <div className="lg:hidden space-y-4">
-                        {filteredRequests.map((request) => (
-                            <div key={request.id} className="bg-white shadow-sm rounded-lg p-4 border border-gray-200">
-                                <div className="flex items-start justify-between mb-3">
-                                    <div className="flex-1 min-w-0">
-                                        <h3 className="text-sm font-medium text-gray-900 truncate">
-                                            {request.item}
-                                        </h3>
-                                        <p className="text-xs text-gray-500">#{request.id}</p>
+                        {loading ? (
+                            <CardSkeleton count={5} />
+                        ) : (
+                            filteredRequests.map((request) => (
+                                <div key={request.id} className="bg-white shadow-sm rounded-lg p-4 border border-gray-200">
+                                    <div className="flex items-start justify-between mb-3">
+                                        <div className="flex-1 min-w-0">
+                                            <h3 className="text-sm font-medium text-gray-900 truncate">
+                                                {request.item}
+                                            </h3>
+                                            <p className="text-xs text-gray-500">#{request.id}</p>
+                                        </div>
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
+                                            {getStatusDisplayText(request.status, request)}
+                                        </span>
                                     </div>
-                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
-                                        {getStatusDisplayText(request.status, request)}
-                                    </span>
-                                </div>
 
-                                <div className="space-y-2 text-sm">
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-500">Employee:</span>
-                                        <span className="text-gray-900">{request.employee?.full_name || 'N/A'}</span>
+                                    <div className="space-y-2 text-sm">
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">Employee:</span>
+                                            <span className="text-gray-900">{request.employee?.full_name || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">Department:</span>
+                                            <span className="text-gray-900">{request.employee?.department?.name || 'N/A'}</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">Amount:</span>
+                                            <span className="text-gray-900 font-medium">{parseFloat(request.amount).toFixed(2)} AFN</span>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span className="text-gray-500">Date:</span>
+                                            <span className="text-gray-900">{new Date(request.created_at).toLocaleDateString()}</span>
+                                        </div>
                                     </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-500">Department:</span>
-                                        <span className="text-gray-900">{request.employee?.department?.name || 'N/A'}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-500">Amount:</span>
-                                        <span className="text-gray-900 font-medium">{parseFloat(request.amount).toFixed(2)} AFN</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-500">Date:</span>
-                                        <span className="text-gray-900">{new Date(request.created_at).toLocaleDateString()}</span>
-                                    </div>
-                                </div>
 
-                                <div className="mt-4 pt-3 border-t border-gray-200">
-                                    <Link
-                                        href={`/requests/${request.id}`}
-                                        className="w-full bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center block"
-                                    >
-                                        View Details
-                                    </Link>
+                                    <div className="mt-4 pt-3 border-t border-gray-200">
+                                        <Link
+                                            href={`/requests/${request.id}`}
+                                            className="w-full bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center block"
+                                        >
+                                            View Details
+                                        </Link>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))
+                        )}
                     </div>
 
-                    {filteredRequests.length === 0 && (
+                    {!loading && filteredRequests.length === 0 && (
                         <div className="text-center py-12">
                             <div className="text-gray-400 text-6xl mb-4">📄</div>
                             <h3 className="text-lg font-medium text-gray-900 mb-2">No requests found</h3>

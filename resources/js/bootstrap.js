@@ -58,7 +58,6 @@ window.route = (name, params = {}) => {
     const routes = {
         'login': '/login',
         'logout': '/logout',
-        'dashboard': '/dashboard',
         'home': '/',
         'password.request': '/password/reset'
     };

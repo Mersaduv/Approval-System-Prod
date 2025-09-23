@@ -4,7 +4,7 @@ import DelegationManagement from "../Components/DelegationManagement";
 
 export default function DelegationManagementPage({ auth }) {
     return (
-        <AppLayout auth={auth}>
+        <AppLayout title="Delegation Management" auth={auth}>
             <Head title="Delegation Management" />
             <DelegationManagement auth={auth} />
         </AppLayout>

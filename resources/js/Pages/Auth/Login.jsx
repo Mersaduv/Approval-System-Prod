@@ -29,14 +29,12 @@ export default function Login({ status, canResetPassword }) {
 
             <div className="max-w-md w-full space-y-8">
                 <div>
-                    <div className="mx-auto h-12 w-12 bg-blue-600 rounded-lg flex items-center justify-center">
-                        <span className="text-white font-bold text-xl">A</span>
+                    <div className="mx-auto rounded-lg flex items-center justify-center">
+                        {/* logo  */}
+                        <img src="/images/logo.png" alt="Approval Form Logo" className="w-[300px]" />
                     </div>
-                    <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                        Sign in to your account
-                    </h2>
                     <p className="mt-2 text-center text-sm text-gray-600">
-                        Approval Workflow Management System
+                      Approval Form - Approval Workflow Management
                     </p>
                 </div>
 
@@ -154,7 +152,7 @@ export default function Login({ status, canResetPassword }) {
 
                 <div className="text-center">
                     <p className="text-sm text-gray-600">
-                        Approval Workflow Management System - Version 1.0
+                        Approval Form - Version 1.0
                     </p>
                 </div>
             </div>

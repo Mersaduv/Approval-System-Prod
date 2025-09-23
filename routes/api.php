@@ -76,6 +76,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::post('/delegations', [DelegationController::class, 'store']);
     Route::put('/delegations/{id}', [DelegationController::class, 'update']);
     Route::delete('/delegations/{id}', [DelegationController::class, 'destroy']);
+    Route::post('/delegations/{id}/reject', [DelegationController::class, 'reject']);
     Route::get('/delegations/available-users', [DelegationController::class, 'getAvailableUsers']);
     Route::get('/delegations/workflow-steps', [DelegationController::class, 'getWorkflowSteps']);
     Route::get('/delegations/stats', [DelegationController::class, 'getStats']);

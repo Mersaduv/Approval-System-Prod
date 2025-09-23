@@ -16,11 +16,17 @@ class WorkflowStepAssignment extends Model
         'assignable_type',
         'assignable_id',
         'is_required',
+        'can_approve',
+        'can_verify',
+        'can_notify',
         'conditions'
     ];
 
     protected $casts = [
         'is_required' => 'boolean',
+        'can_approve' => 'boolean',
+        'can_verify' => 'boolean',
+        'can_notify' => 'boolean',
         'conditions' => 'array'
     ];
 

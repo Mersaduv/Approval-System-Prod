@@ -907,6 +907,16 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
                 setActionData({ status: "", final_cost: "", notes: "" });
                 setBillPrintingData({ bill_notes: "" });
                 fetchRequestDetails(); // Refresh the request data
+
+                // Show success message
+                const successMessage = response.data.message || "Action completed successfully!";
+                showAlertMessage(successMessage, "success");
+            } else {
+                // Show error message if success is false
+                showAlertMessage(
+                    response.data.message || "Action failed. Please try again.",
+                    "error"
+                );
             }
         } catch (error) {
             console.error("Error performing action:", error);

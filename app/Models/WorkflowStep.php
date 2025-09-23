@@ -75,8 +75,9 @@ class WorkflowStep extends Model
         $steps = self::getActiveSteps();
         $applicableSteps = [];
 
-        // Check if the request creator is admin
-        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+        // Check if the request creator is admin or procurement
+        $isAdminRequest = $request->employee && $request->employee->role &&
+            in_array($request->employee->role->name, ['admin', 'procurement']);
 
         foreach ($steps as $step) {
             // Skip auto approve steps from workflow progress display
@@ -105,8 +106,9 @@ class WorkflowStep extends Model
         $steps = self::getActiveSteps();
         $applicableSteps = [];
 
-        // Check if the request creator is admin
-        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+        // Check if the request creator is admin or procurement
+        $isAdminRequest = $request->employee && $request->employee->role &&
+            in_array($request->employee->role->name, ['admin', 'procurement']);
 
         foreach ($steps as $step) {
             // Skip manager assignment steps for admin requests

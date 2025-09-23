@@ -1,6 +1,7 @@
 import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
+import { TableRowSkeleton } from '../Components/SkeletonLoader'
 
 export default function Reports({ auth }) {
     const [activeTab, setActiveTab] = useState('overview')
@@ -119,15 +120,7 @@ export default function Reports({ auth }) {
         { id: 'activity', name: 'Activity Log', icon: '📋' }
     ]
 
-    if (loading) {
-        return (
-            <AppLayout title="Reports" auth={auth}>
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                </div>
-            </AppLayout>
-        )
-    }
+    // Remove full page loading - we'll show skeleton loading instead
 
     return (
         <AppLayout title="Reports" auth={auth}>
@@ -312,18 +305,22 @@ export default function Reports({ auth }) {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                            {departmentData.map((dept, index) => (
-                                                <tr key={index}>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{dept.department_name}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{dept.total_requests}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(dept.total_amount)}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{dept.approved_count}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{dept.rejected_count}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                        {Math.round((dept.approved_count / (dept.approved_count + dept.rejected_count)) * 100)}%
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                            {loading ? (
+                                                <TableRowSkeleton columns={6} rows={6} />
+                                            ) : (
+                                                departmentData.map((dept, index) => (
+                                                    <tr key={index}>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{dept.department_name}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{dept.total_requests}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(dept.total_amount)}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{dept.approved_count}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{dept.rejected_count}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                            {Math.round((dept.approved_count / (dept.approved_count + dept.rejected_count)) * 100)}%
+                                                        </td>
+                                                    </tr>
+                                                ))
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -352,16 +349,20 @@ export default function Reports({ auth }) {
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
-                                            {userData.map((user, index) => (
-                                                <tr key={index}>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.full_name}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.department_name}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.total_requests}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(user.total_amount)}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{user.approved_count}</td>
-                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{user.total_requests - user.approved_count}</td>
-                                                </tr>
-                                            ))}
+                                            {loading ? (
+                                                <TableRowSkeleton columns={6} rows={5} />
+                                            ) : (
+                                                userData.map((user, index) => (
+                                                    <tr key={index}>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{user.full_name}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.department_name}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{user.total_requests}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatCurrency(user.total_amount)}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-green-600">{user.approved_count}</td>
+                                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-red-600">{user.total_requests - user.approved_count}</td>
+                                                    </tr>
+                                                ))
+                                            )}
                                         </tbody>
                                     </table>
                                 </div>
@@ -401,27 +402,48 @@ export default function Reports({ auth }) {
                                     </button>
                                 </div>
                                 <div className="space-y-4">
-                                    {activityLog.map((log) => (
-                                        <div key={log.id} className="bg-white border border-gray-200 rounded-lg p-4">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center space-x-3">
-                                                    <div className={`w-2 h-2 rounded-full ${
-                                                        log.action === 'Approved' ? 'bg-green-500' :
-                                                        log.action === 'Rejected' ? 'bg-red-500' : 'bg-yellow-500'
-                                                    }`}></div>
-                                                    <div>
-                                                        <p className="text-sm font-medium text-gray-900">
-                                                            {log.user.full_name} ({log.user.role}) {log.action} request
-                                                        </p>
-                                                        <p className="text-sm text-gray-500">{log.request.item}</p>
+                                    {loading ? (
+                                        <div className="space-y-4">
+                                            {Array.from({ length: 5 }).map((_, index) => (
+                                                <div key={index} className="bg-white border border-gray-200 rounded-lg p-4 animate-pulse">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center space-x-3">
+                                                            <div className="w-2 h-2 bg-gray-200 rounded-full"></div>
+                                                            <div>
+                                                                <div className="h-4 bg-gray-200 rounded w-48 mb-2"></div>
+                                                                <div className="h-3 bg-gray-200 rounded w-32"></div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <div className="h-3 bg-gray-200 rounded w-24"></div>
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className="text-sm text-gray-500">{formatDateTime(log.created_at)}</p>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        activityLog.map((log) => (
+                                            <div key={log.id} className="bg-white border border-gray-200 rounded-lg p-4">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center space-x-3">
+                                                        <div className={`w-2 h-2 rounded-full ${
+                                                            log.action === 'Approved' ? 'bg-green-500' :
+                                                            log.action === 'Rejected' ? 'bg-red-500' : 'bg-yellow-500'
+                                                        }`}></div>
+                                                        <div>
+                                                            <p className="text-sm font-medium text-gray-900">
+                                                                {log.user.full_name} ({log.user.role}) {log.action} request
+                                                            </p>
+                                                            <p className="text-sm text-gray-500">{log.request.item}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="text-sm text-gray-500">{formatDateTime(log.created_at)}</p>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
-                                    ))}
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         )}

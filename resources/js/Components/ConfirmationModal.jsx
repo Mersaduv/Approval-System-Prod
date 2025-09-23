@@ -9,7 +9,10 @@ export default function ConfirmationModal({
     confirmText = "Confirm",
     cancelText = "Cancel",
     type = "warning", // warning, danger, info
-    isLoading = false
+    isLoading = false,
+    showRejectReason = false,
+    rejectReason = '',
+    onRejectReasonChange = () => {}
 }) {
     if (!isOpen) return null
 
@@ -75,6 +78,22 @@ export default function ConfirmationModal({
                                         {message}
                                     </p>
                                 </div>
+                                {showRejectReason && (
+                                    <div className="mt-4">
+                                        <label htmlFor="reject-reason" className="block text-sm font-medium text-gray-700">
+                                            Reason for rejection <span className="text-red-500">*</span>
+                                        </label>
+                                        <textarea
+                                            id="reject-reason"
+                                            value={rejectReason}
+                                            onChange={(e) => onRejectReasonChange(e.target.value)}
+                                            className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                                            rows={3}
+                                            placeholder="Please provide a reason for rejecting this delegation..."
+                                            required
+                                        />
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -82,7 +101,7 @@ export default function ConfirmationModal({
                         <button
                             type="button"
                             onClick={onConfirm}
-                            disabled={isLoading}
+                            disabled={isLoading || (showRejectReason && !rejectReason.trim())}
                             className={`confirmation-modal-button w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white ${typeStyles.confirmButton} focus:outline-none focus:ring-2 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                             {isLoading ? (

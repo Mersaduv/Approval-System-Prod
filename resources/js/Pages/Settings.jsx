@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import ConfirmationModal from '../Components/ConfirmationModal'
 import AlertModal from '../Components/AlertModal'
+import { TableRowSkeleton, CardSkeleton } from '../Components/SkeletonLoader'
 import {
     DndContext,
     closestCenter,
@@ -349,15 +350,7 @@ export default function Settings({ auth }) {
         { id: 'workflow', name: 'Workflow Settings', icon: '🔄' }
     ]
 
-    if (loading || settingsLoading) {
-        return (
-            <AppLayout title="Settings" auth={auth}>
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                </div>
-            </AppLayout>
-        )
-    }
+    // Remove full page loading - we'll show skeleton loading instead
 
     return (
         <AppLayout title="Settings" auth={auth}>
@@ -478,83 +471,91 @@ export default function Settings({ auth }) {
                                         </tr>
                                     </thead>
                                     <tbody className="bg-white divide-y divide-gray-200">
-                                        {departments.map((department) => (
-                                            <tr key={department.id} className="hover:bg-gray-50">
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                    {department.name}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm text-gray-500">
-                                                    {department.description || 'No description'}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {department.role?.name || 'N/A'}
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    {department.users_count || 0} users
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                    <div className="flex space-x-2">
-                                                        <button
-                                                            onClick={() => handleEditDepartment(department)}
-                                                            className="text-blue-600 hover:text-blue-900"
-                                                        >
-                                                            Edit
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDeleteDepartment(department.id)}
-                                                            className="text-red-600 hover:text-red-900"
-                                                        >
-                                                            Delete
-                                                        </button>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        ))}
+                                        {loading ? (
+                                            <TableRowSkeleton columns={5} rows={5} />
+                                        ) : (
+                                            departments.map((department) => (
+                                                <tr key={department.id} className="hover:bg-gray-50">
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                                        {department.name}
+                                                    </td>
+                                                    <td className="px-6 py-4 text-sm text-gray-500">
+                                                        {department.description || 'No description'}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        {department.role?.name || 'N/A'}
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                        {department.users_count || 0} users
+                                                    </td>
+                                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                        <div className="flex space-x-2">
+                                                            <button
+                                                                onClick={() => handleEditDepartment(department)}
+                                                                className="text-blue-600 hover:text-blue-900"
+                                                            >
+                                                                Edit
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleDeleteDepartment(department.id)}
+                                                                className="text-red-600 hover:text-red-900"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
 
                             {/* Mobile Cards */}
                             <div className="lg:hidden space-y-4">
-                                {departments.map((department) => (
-                                    <div key={department.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
-                                        <div className="flex items-start justify-between mb-3">
-                                            <h3 className="text-sm font-medium text-gray-900">{department.name}</h3>
-                                            <div className="flex space-x-2">
-                                                <button
-                                                    onClick={() => handleEditDepartment(department)}
-                                                    className="text-blue-600 hover:text-blue-900 text-xs"
-                                                >
-                                                    Edit
-                                                </button>
-                                                <button
-                                                    onClick={() => handleDeleteDepartment(department.id)}
-                                                    className="text-red-600 hover:text-red-900 text-xs"
-                                                >
-                                                    Delete
-                                                </button>
+                                {loading ? (
+                                    <CardSkeleton count={5} />
+                                ) : (
+                                    departments.map((department) => (
+                                        <div key={department.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                                            <div className="flex items-start justify-between mb-3">
+                                                <h3 className="text-sm font-medium text-gray-900">{department.name}</h3>
+                                                <div className="flex space-x-2">
+                                                    <button
+                                                        onClick={() => handleEditDepartment(department)}
+                                                        className="text-blue-600 hover:text-blue-900 text-xs"
+                                                    >
+                                                        Edit
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleDeleteDepartment(department.id)}
+                                                        className="text-red-600 hover:text-red-900 text-xs"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
                                             </div>
-                                        </div>
 
-                                        <div className="space-y-2 text-sm">
-                                            <div>
-                                                <span className="text-gray-500">Description:</span>
-                                                <p className="text-gray-900">{department.description || 'No description'}</p>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-500">Role:</span>
-                                                <span className="text-gray-900">{department.role?.name || 'N/A'}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-500">Users:</span>
-                                                <span className="text-gray-900">{department.users_count || 0} users</span>
+                                            <div className="space-y-2 text-sm">
+                                                <div>
+                                                    <span className="text-gray-500">Description:</span>
+                                                    <p className="text-gray-900">{department.description || 'No description'}</p>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Role:</span>
+                                                    <span className="text-gray-900">{department.role?.name || 'N/A'}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Users:</span>
+                                                    <span className="text-gray-900">{department.users_count || 0} users</span>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))
+                                )}
                             </div>
 
-                            {departments.length === 0 && (
+                            {!loading && departments.length === 0 && (
                                 <div className="text-center py-12">
                                     <div className="text-gray-400 text-6xl mb-4">🏢</div>
                                     <h3 className="text-lg font-medium text-gray-900 mb-2">No departments found</h3>

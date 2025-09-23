@@ -3,6 +3,7 @@ import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import AlertModal from '../Components/AlertModal'
+import { TableRowSkeleton, CardSkeleton } from '../Components/SkeletonLoader'
 
 export default function Users({ auth }) {
     const [users, setUsers] = useState([])
@@ -164,15 +165,7 @@ export default function Users({ auth }) {
         }
     }
 
-    if (loading) {
-        return (
-            <AppLayout title="Users" auth={auth}>
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                </div>
-            </AppLayout>
-        )
-    }
+    // Remove full page loading - we'll show skeleton loading instead
 
     return (
         <AppLayout title="Users" auth={auth}>
@@ -269,111 +262,119 @@ export default function Users({ auth }) {
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {filteredUsers.map((user) => (
-                                <tr key={user.id} className="hover:bg-gray-50">
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                        {user.full_name}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {user.email}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {user.role?.name || 'N/A'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                        {user.department?.name || 'N/A'}
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap">
-                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor('Active')}`}>
-                                            Active
-                                        </span>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                        <div className="flex items-center space-x-2">
-                                            <button
-                                                onClick={() => handleEdit(user)}
-                                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                                                title="Edit user"
-                                            >
-                                                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                                </svg>
-                                                Edit
-                                            </button>
-                                            <button
-                                                onClick={() => handleDeleteClick(user.id)}
-                                                className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
-                                                title="Delete user"
-                                            >
-                                                <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                </svg>
-                                                Delete
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                            {loading ? (
+                                <TableRowSkeleton columns={6} rows={5} />
+                            ) : (
+                                filteredUsers.map((user) => (
+                                    <tr key={user.id} className="hover:bg-gray-50">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                            {user.full_name}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            {user.email}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            {user.role?.name || 'N/A'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                            {user.department?.name || 'N/A'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap">
+                                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor('Active')}`}>
+                                                Active
+                                            </span>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                            <div className="flex items-center space-x-2">
+                                                <button
+                                                    onClick={() => handleEdit(user)}
+                                                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-700 bg-blue-100 hover:bg-blue-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                                                    title="Edit user"
+                                                >
+                                                    <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                                    </svg>
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    onClick={() => handleDeleteClick(user.id)}
+                                                    className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+                                                    title="Delete user"
+                                                >
+                                                    <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                                    </svg>
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))
+                            )}
                         </tbody>
                     </table>
                 </div>
 
                 {/* Users Cards - Mobile */}
                 <div className="lg:hidden space-y-4">
-                    {filteredUsers.map((user) => (
-                        <div key={user.id} className="bg-white shadow-sm rounded-lg p-4 border border-gray-200">
-                            <div className="flex items-start justify-between mb-3">
-                                <div className="flex-1 min-w-0">
-                                    <h3 className="text-sm font-medium text-gray-900 truncate">
-                                        {user.full_name}
-                                    </h3>
-                                    <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                    {loading ? (
+                        <CardSkeleton count={5} />
+                    ) : (
+                        filteredUsers.map((user) => (
+                            <div key={user.id} className="bg-white shadow-sm rounded-lg p-4 border border-gray-200">
+                                <div className="flex items-start justify-between mb-3">
+                                    <div className="flex-1 min-w-0">
+                                        <h3 className="text-sm font-medium text-gray-900 truncate">
+                                            {user.full_name}
+                                        </h3>
+                                        <p className="text-xs text-gray-500 truncate">{user.email}</p>
+                                    </div>
+                                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor('Active')}`}>
+                                        Active
+                                    </span>
                                 </div>
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor('Active')}`}>
-                                    Active
-                                </span>
-                            </div>
 
-                            <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                    <span className="text-gray-500">Role:</span>
-                                    <span className="text-gray-900">{user.role?.name || 'N/A'}</span>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-500">Role:</span>
+                                        <span className="text-gray-900">{user.role?.name || 'N/A'}</span>
+                                    </div>
+                                    <div className="flex justify-between">
+                                        <span className="text-gray-500">Department:</span>
+                                        <span className="text-gray-900">{user.department?.name || 'N/A'}</span>
+                                    </div>
                                 </div>
-                                <div className="flex justify-between">
-                                    <span className="text-gray-500">Department:</span>
-                                    <span className="text-gray-900">{user.department?.name || 'N/A'}</span>
-                                </div>
-                            </div>
 
-                            <div className="mt-4 pt-3 border-t border-gray-200">
-                                <div className="flex space-x-2">
-                                    <button
-                                        onClick={() => handleEdit(user)}
-                                        className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
-                                        title="Edit user"
-                                    >
-                                        <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                        </svg>
-                                        Edit
-                                    </button>
-                                    <button
-                                        onClick={() => handleDeleteClick(user.id)}
-                                        className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
-                                        title="Delete user"
-                                    >
-                                        <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                        </svg>
-                                        Delete
-                                    </button>
+                                <div className="mt-4 pt-3 border-t border-gray-200">
+                                    <div className="flex space-x-2">
+                                        <button
+                                            onClick={() => handleEdit(user)}
+                                            className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                                            title="Edit user"
+                                        >
+                                            <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                            Edit
+                                        </button>
+                                        <button
+                                            onClick={() => handleDeleteClick(user.id)}
+                                            className="flex-1 inline-flex items-center justify-center px-3 py-2 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1"
+                                            title="Delete user"
+                                        >
+                                            <svg className="w-5 h-5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            Delete
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    ))}
+                        ))
+                    )}
                 </div>
 
-                {filteredUsers.length === 0 && (
+                {!loading && filteredUsers.length === 0 && (
                     <div className="text-center py-12">
                         <div className="text-gray-400 text-6xl mb-4">👥</div>
                         <h3 className="text-lg font-medium text-gray-900 mb-2">No users found</h3>
