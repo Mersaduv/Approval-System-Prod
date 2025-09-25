@@ -15,7 +15,7 @@ class ApprovalRuleController extends Controller
     public function __construct()
     {
         $this->middleware(function ($request, $next) {
-            if (Auth::user()->role !== 'Admin') {
+            if (Auth::user()->role->name !== 'admin') {
                 return response()->json([
                     'success' => false,
                     'message' => 'Unauthorized. Admin access required.'
@@ -284,6 +284,28 @@ class ApprovalRuleController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to update department rules',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk delete all rules for a department
+     */
+    public function bulkDelete(Request $request, string $departmentId): JsonResponse
+    {
+        try {
+            $deletedCount = ApprovalRule::where('department_id', $departmentId)->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => "Deleted {$deletedCount} approval rules for this department"
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete department rules',
                 'error' => $e->getMessage()
             ], 500);
         }

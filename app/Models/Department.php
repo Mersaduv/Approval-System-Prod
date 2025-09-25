@@ -12,7 +12,6 @@ class Department extends Model
     protected $fillable = [
         'name',
         'description',
-        'role_id',
     ];
 
     public function users()
@@ -25,8 +24,8 @@ class Department extends Model
         return $this->hasMany(ApprovalRule::class);
     }
 
-    public function role()
+    public function roles()
     {
-        return $this->belongsTo(Role::class);
+        return $this->belongsToMany(Role::class, 'department_role');
     }
 }

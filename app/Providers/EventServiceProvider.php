@@ -18,6 +18,31 @@ class EventServiceProvider extends ServiceProvider
         Registered::class => [
             SendEmailVerificationNotification::class,
         ],
+
+        // Request Events
+        \App\Events\RequestSubmitted::class => [
+            \App\Listeners\SendRequestSubmittedNotification::class,
+        ],
+
+        \App\Events\RequestApproved::class => [
+            \App\Listeners\SendRequestApprovedNotification::class,
+        ],
+
+        \App\Events\RequestRejected::class => [
+            \App\Listeners\SendRequestRejectedNotification::class,
+        ],
+
+        \App\Events\RequestDelivered::class => [
+            \App\Listeners\SendRequestDeliveredNotification::class,
+        ],
+
+        \App\Events\ApprovalRequired::class => [
+            \App\Listeners\SendApprovalRequiredNotification::class,
+        ],
+
+        \App\Events\WorkflowStepExecuted::class => [
+            \App\Listeners\SendWorkflowStepNotification::class,
+        ],
     ];
 
     /**

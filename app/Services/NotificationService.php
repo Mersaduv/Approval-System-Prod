@@ -18,8 +18,8 @@ class NotificationService
      */
     public function sendApprovalRequest(RequestModel $request, User $approver, string $message): void
     {
-        // Create approval token
-        $approvalToken = ApprovalToken::createToken($request->id, $approver->id, 'approve', 48);
+        // Create approval token (never expires)
+        $approvalToken = ApprovalToken::createToken($request->id, $approver->id, 'approve');
 
         // Send in-app notification
         $this->sendInAppNotification(
@@ -72,12 +72,23 @@ class NotificationService
         })->get();
 
         foreach ($procurementUsers as $user) {
+            // Create approval token (never expires)
+            $approvalToken = ApprovalToken::createToken($request->id, $user->id, 'approve');
+
+            // Send in-app notification
             $this->sendInAppNotification(
                 $request,
                 $user->id,
-                'Procurement Verification Required',
-                "New request requires procurement verification: {$request->item} - Amount: {$request->amount} AFN"
+                'Approval Required',
+                "Approval required for step: Procurement Verification"
             );
+
+            // Send email notification using simple template
+            try {
+                Mail::to($user->email)->send(new ApprovalNotificationMail($request, $user, $approvalToken, 'approve'));
+            } catch (\Exception $e) {
+                Log::error('Failed to send procurement verification email: ' . $e->getMessage());
+            }
         }
     }
 
@@ -92,12 +103,23 @@ class NotificationService
         })->get();
 
         foreach ($adminUsers as $user) {
+            // Create approval token (never expires)
+            $approvalToken = ApprovalToken::createToken($request->id, $user->id, 'approve');
+
+            // Send in-app notification
             $this->sendInAppNotification(
                 $request,
                 $user->id,
-                'New Procurement Request',
-                "New approved request requires procurement: {$request->item}"
+                'Approval Required',
+                "Approval required for step: Procurement Order"
             );
+
+            // Send email notification using simple template
+            try {
+                Mail::to($user->email)->send(new ApprovalNotificationMail($request, $user, $approvalToken, 'approve'));
+            } catch (\Exception $e) {
+                Log::error('Failed to send procurement notification email: ' . $e->getMessage());
+            }
         }
     }
 

@@ -11,7 +11,7 @@ use Illuminate\Queue\SerializesModels;
 use App\Models\Request as RequestModel;
 use App\Models\User;
 
-class EmployeeNotificationMail extends Mailable
+class EmployeeNotificationMail extends Mailable implements ShouldQueue
 {
     use Queueable, SerializesModels;
 

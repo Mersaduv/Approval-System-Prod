@@ -5,6 +5,7 @@ import axios from 'axios'
 import ConfirmationModal from '../Components/ConfirmationModal'
 import AlertModal from '../Components/AlertModal'
 import { TableRowSkeleton, CardSkeleton } from '../Components/SkeletonLoader'
+import MultiSelectDropdown from '../Components/MultiSelectDropdown'
 import {
     DndContext,
     closestCenter,
@@ -100,13 +101,14 @@ function SortableWorkflowStep({ step }) {
 export default function Settings({ auth }) {
     const [activeTab, setActiveTab] = useState('general')
     const [departments, setDepartments] = useState([])
+    const [roles, setRoles] = useState([])
     const [loading, setLoading] = useState(true)
     const [showDepartmentModal, setShowDepartmentModal] = useState(false)
     const [editingDepartment, setEditingDepartment] = useState(null)
     const [departmentForm, setDepartmentForm] = useState({
         name: '',
         description: '',
-        role_id: ''
+        role_ids: []
     })
     const [departmentErrors, setDepartmentErrors] = useState({})
     const [submitting, setSubmitting] = useState(false)
@@ -148,6 +150,7 @@ export default function Settings({ auth }) {
 
     useEffect(() => {
         fetchDepartments()
+        fetchRoles()
         fetchSettings()
         fetchWorkflowData()
     }, [])
@@ -180,6 +183,17 @@ export default function Settings({ auth }) {
             console.error('Error fetching departments:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const fetchRoles = async () => {
+        try {
+            const response = await axios.get('/api/admin/roles')
+            if (response.data.success) {
+                setRoles(response.data.data)
+            }
+        } catch (error) {
+            console.error('Error fetching roles:', error)
         }
     }
 
@@ -262,7 +276,7 @@ export default function Settings({ auth }) {
             if (response.data.success) {
                 setShowDepartmentModal(false)
                 setEditingDepartment(null)
-                setDepartmentForm({ name: '', description: '', role_id: '' })
+                setDepartmentForm({ name: '', description: '', role_ids: [] })
                 fetchDepartments()
             }
         } catch (error) {
@@ -279,16 +293,18 @@ export default function Settings({ auth }) {
         setDepartmentForm({
             name: department.name,
             description: department.description || '',
-            role_id: department.role_id || ''
+            role_ids: department.roles ? department.roles.map(role => role.id) : []
         })
         setShowDepartmentModal(true)
     }
+
 
     const handleDeleteDepartment = (departmentId) => {
         const department = departments.find(d => d.id === departmentId)
         setDepartmentToDelete(department)
         setShowDeleteModal(true)
     }
+
 
     const handleDeleteConfirm = async () => {
         if (!departmentToDelete) return
@@ -299,9 +315,11 @@ export default function Settings({ auth }) {
             setShowDeleteModal(false)
             setDepartmentToDelete(null)
             fetchDepartments()
+            showAlertMessage('Department deleted successfully.', 'success')
         } catch (error) {
             console.error('Error deleting department:', error)
-            showAlertMessage('Error deleting department. Please try again.', 'error')
+            const errorMessage = error.response?.data?.message || 'Error deleting department. Please try again.'
+            showAlertMessage(errorMessage, 'error')
         } finally {
             setDeleting(false)
         }
@@ -439,7 +457,7 @@ export default function Settings({ auth }) {
                                 <button
                                     onClick={() => {
                                         setEditingDepartment(null)
-                                        setDepartmentForm({ name: '', description: '' })
+                                        setDepartmentForm({ name: '', description: '', role_ids: [] })
                                         setShowDepartmentModal(true)
                                     }}
                                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-center"
@@ -483,7 +501,17 @@ export default function Settings({ auth }) {
                                                         {department.description || 'No description'}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                        {department.role?.name || 'N/A'}
+                                                        {department.roles && department.roles.length > 0 ? (
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {department.roles.map((role, index) => (
+                                                                    <span key={role.id} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                                        {role.name}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            'N/A'
+                                                        )}
                                                     </td>
                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                         {department.users_count || 0} users
@@ -498,7 +526,13 @@ export default function Settings({ auth }) {
                                                             </button>
                                                             <button
                                                                 onClick={() => handleDeleteDepartment(department.id)}
-                                                                className="text-red-600 hover:text-red-900"
+                                                                className={`${
+                                                                    department.users_count > 0
+                                                                        ? 'text-gray-400 cursor-not-allowed'
+                                                                        : 'text-red-600 hover:text-red-900'
+                                                                }`}
+                                                                disabled={department.users_count > 0}
+                                                                title={department.users_count > 0 ? 'Cannot delete department with users' : 'Delete department'}
                                                             >
                                                                 Delete
                                                             </button>
@@ -529,7 +563,13 @@ export default function Settings({ auth }) {
                                                     </button>
                                                     <button
                                                         onClick={() => handleDeleteDepartment(department.id)}
-                                                        className="text-red-600 hover:text-red-900 text-xs"
+                                                        className={`text-xs ${
+                                                            department.users_count > 0
+                                                                ? 'text-gray-400 cursor-not-allowed'
+                                                                : 'text-red-600 hover:text-red-900'
+                                                        }`}
+                                                        disabled={department.users_count > 0}
+                                                        title={department.users_count > 0 ? 'Cannot delete department with users' : 'Delete department'}
                                                     >
                                                         Delete
                                                     </button>
@@ -542,8 +582,20 @@ export default function Settings({ auth }) {
                                                     <p className="text-gray-900">{department.description || 'No description'}</p>
                                                 </div>
                                                 <div className="flex justify-between">
-                                                    <span className="text-gray-500">Role:</span>
-                                                    <span className="text-gray-900">{department.role?.name || 'N/A'}</span>
+                                                    <span className="text-gray-500">Roles:</span>
+                                                    <div className="text-gray-900">
+                                                        {department.roles && department.roles.length > 0 ? (
+                                                            <div className="flex flex-wrap gap-1">
+                                                                {department.roles.map((role) => (
+                                                                    <span key={role.id} className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                                        {role.name}
+                                                                    </span>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            'N/A'
+                                                        )}
+                                                    </div>
                                                 </div>
                                                 <div className="flex justify-between">
                                                     <span className="text-gray-500">Users:</span>
@@ -593,21 +645,15 @@ export default function Settings({ auth }) {
                                         </div>
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                                Role *
+                                                Roles *
                                             </label>
-                                            <select
-                                                value={departmentForm.role_id}
-                                                onChange={(e) => setDepartmentForm(prev => ({ ...prev, role_id: e.target.value }))}
-                                                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${departmentErrors.role_id ? 'border-red-300' : 'border-gray-300'}`}
-                                                required
-                                            >
-                                                <option value="">Select Role</option>
-                                                <option value="1">admin</option>
-                                                <option value="2">manager</option>
-                                                <option value="3">employee</option>
-                                                <option value="4">procurement</option>
-                                            </select>
-                                            {departmentErrors.role_id && <p className="mt-1 text-sm text-red-600">{departmentErrors.role_id[0]}</p>}
+                                            <MultiSelectDropdown
+                                                options={roles}
+                                                selectedValues={departmentForm.role_ids}
+                                                onChange={(selectedIds) => setDepartmentForm(prev => ({ ...prev, role_ids: selectedIds }))}
+                                                placeholder="Select roles..."
+                                                error={departmentErrors.role_ids ? departmentErrors.role_ids[0] : null}
+                                            />
                                         </div>
                                     </div>
                                     <div>
@@ -777,10 +823,14 @@ export default function Settings({ auth }) {
                 }}
                 onConfirm={handleDeleteConfirm}
                 title="Delete Department"
-                message={`Are you sure you want to delete ${departmentToDelete?.name}? This action cannot be undone.`}
-                confirmText="Delete"
+                message={
+                    departmentToDelete?.users_count > 0
+                        ? `Cannot delete "${departmentToDelete?.name}" because it has ${departmentToDelete.users_count} user(s). Please reassign users first.`
+                        : `Are you sure you want to delete "${departmentToDelete?.name}"? This action cannot be undone.`
+                }
+                confirmText={departmentToDelete?.users_count > 0 ? "OK" : "Delete"}
                 cancelText="Cancel"
-                type="danger"
+                type={departmentToDelete?.users_count > 0 ? "warning" : "danger"}
                 isLoading={deleting}
             />
 

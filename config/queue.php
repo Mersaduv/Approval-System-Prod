@@ -13,7 +13,19 @@ return [
     |
     */
 
-    'default' => env('QUEUE_CONNECTION', 'sync'),
+    'default' => env('QUEUE_CONNECTION', 'database'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Queue Worker Auto Start
+    |--------------------------------------------------------------------------
+    |
+    | This option determines if the queue worker should be automatically
+    | started when the application boots. Set to false to disable.
+    |
+    */
+
+    'auto_start_worker' => env('QUEUE_AUTO_START_WORKER', true),
 
     /*
     |--------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import axios from "axios";
 import AlertModal from "../Components/AlertModal";
 import AuditTrailGraph from "../Components/AuditTrailGraph";
 
-export default function RequestView({ auth, requestId, source = "requests" }) {
+export default function RequestView({ auth, requestId, source = "requests", approvalToken = null }) {
     const [request, setRequest] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showActionModal, setShowActionModal] = useState(false);
@@ -35,6 +35,9 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
         delay_date: "",
         delay_reason: "",
     });
+
+    // Approval Portal Mode
+    const isApprovalPortal = source === "approval" && approvalToken;
 
     const showAlertMessage = (message, type = "info") => {
         setAlertMessage(message);
@@ -730,6 +733,33 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
         }
     };
 
+    // Approval Portal Actions
+    const handleApprovalAction = async (action) => {
+        if (!approvalToken) return;
+
+        setActionLoading(true);
+        try {
+            const response = await axios.post(`/approval/${approvalToken}/process`, {
+                action: action,
+                notes: actionNotes,
+                _token: document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+            });
+
+            if (response.data.success) {
+                showAlertMessage(response.data.message, "success");
+                setTimeout(() => {
+                    window.location.href = `/approval/${approvalToken}/success`;
+                }, 2000);
+            } else {
+                showAlertMessage(response.data.message, "error");
+            }
+        } catch (error) {
+            showAlertMessage("An error occurred while processing your request", "error");
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const handleAction = (action, request = null) => {
         setActionType(action);
         setActionNotes("");
@@ -859,14 +889,19 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
             let data = {};
 
             if (actionType === "approve") {
-                if (auth.user?.id === 28) {
-                    // For Finance users, first print bill then approve
+                // Check if this is a Finance-specific step
+                const currentStep = request.approval_workflow?.steps?.find(step => step.status === 'pending');
+                const isFinanceStep = currentStep?.step_category === 'finance';
+
+                if ((auth.user?.id === 28 || request.delegation_info) && isFinanceStep) {
+                    // For Finance users or delegated users in Finance-specific steps, first print bill then approve
                     endpoint = `/api/requests/${request.id}/finance-approve-with-bill`;
                     data = {
                         notes: actionNotes,
                         bill_amount: billPrintingData.bill_amount,
                     };
                 } else {
+                    // For all other cases, use regular approve
                     endpoint = `/api/requests/${request.id}/approve`;
                     data = { notes: actionNotes };
                 }
@@ -982,6 +1017,17 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
         return false;
     };
 
+    // Helper function to check if a workflow step is completed
+    const isWorkflowStepCompleted = (stepName) => {
+        if (!request?.audit_logs) return false;
+
+        return request.audit_logs.some(log =>
+            log.action === 'Workflow Step Completed' &&
+            log.notes &&
+            log.notes.includes(stepName)
+        );
+    };
+
     const getAvailableActions = () => {
         const user = auth.user;
         if (!user || !request) return [];
@@ -1024,17 +1070,30 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
             );
         }
 
-        // Finance Approval Actions
+        // Finance Manager Approval Actions - Based on step category
         if (user.role?.name === "manager" &&
             user.department?.name === "Finance" &&
             request.status === "Pending Approval" &&
-            request.approval_workflow?.waiting_for === "Finance Approval" &&
             request.approval_workflow?.can_approve) {
-            actions.push(
-                { type: "finance-approve", label: "Approve Request", color: "green", icon: "✓" },
-                { type: "reject", label: "Reject Request", color: "red", icon: "✗" },
-                { type: "delay", label: "Delay Request", color: "yellow", icon: "⏰" }
-            );
+
+            // Get current step category from workflow steps
+            const currentStep = request.approval_workflow?.steps?.find(step => step.status === 'pending');
+            const stepCategory = currentStep?.step_category;
+
+            if (stepCategory === 'manager') {
+                // Manager Approval step - only approve and reject, no delay or bill printing
+                actions.push(
+                    { type: "approve", label: "Approve Request", color: "green", icon: "✓" },
+                    { type: "reject", label: "Reject Request", color: "red", icon: "✗" }
+                );
+            } else if (stepCategory === 'finance') {
+                // Finance Approval step - can approve, reject, delay, and print bill
+                actions.push(
+                    { type: "finance-approve", label: "Approve Request", color: "green", icon: "✓" },
+                    { type: "reject", label: "Reject Request", color: "red", icon: "✗" },
+                    { type: "delay", label: "Delay Request", color: "yellow", icon: "⏰" },
+                );
+            }
         }
 
         // Procurement Order Actions
@@ -1059,6 +1118,100 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
             actions.push(
                 { type: "rollback", label: "Restore Request", color: "orange", icon: "🔄" }
             );
+        }
+
+        // Delegation Actions - If user has delegation access, they can perform the same actions as the original approver
+        if (request.delegation_info && request.delegation_info.original_approver) {
+            // Get delegation step information from delegation_info
+            const delegationStep = request.delegation_info.delegation_step;
+
+            if (delegationStep) {
+                // Determine actions based on the delegated workflow step
+                if (delegationStep.step_type === 'verification') {
+                    // Verification actions for delegated users
+                    actions.push(
+                        { type: "verify", label: "Verify (Delegated)", color: "green", icon: "✓" },
+                        { type: "reject", label: "Reject (Delegated)", color: "red", icon: "✗" }
+                    );
+                } else if (delegationStep.step_type === 'approval' && delegationStep.step_category === 'procurement') {
+                    // Procurement order actions for delegated users
+                    if (request.status === "Approved" || request.status === "Pending Procurement") {
+                        actions.push(
+                            { type: "order", label: "Order (Delegated)", color: "green", icon: "📦" },
+                            { type: "cancel", label: "Cancel (Delegated)", color: "red", icon: "❌" }
+                        );
+                    } else if (request.status === "Ordered") {
+                        actions.push(
+                            { type: "deliver", label: "Deliver (Delegated)", color: "purple", icon: "🚚" }
+                        );
+                    } else if (request.status === "Pending Approval") {
+                        // For Pending Approval status, show order actions for procurement delegation
+                        actions.push(
+                            { type: "order", label: "Order (Delegated)", color: "green", icon: "📦" },
+                            { type: "cancel", label: "Cancel (Delegated)", color: "red", icon: "❌" }
+                        );
+                    }
+                } else if (delegationStep.step_type === 'approval' && delegationStep.step_category === 'finance') {
+                    // Finance Approval step - can approve, reject, delay, and print bill
+                    // Only show actions if the Finance Approval step is not completed yet
+                    if (!isWorkflowStepCompleted('Finance Approval')) {
+                        actions.push(
+                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
+                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" },
+                            { type: "delay", label: "Delay Request (Delegated)", color: "yellow", icon: "⏰" }
+                        );
+                    }
+                } else if (delegationStep.step_type === 'approval') {
+                    // Other approval steps - only approve and reject
+                    // Only show actions if the delegated step is not completed yet
+                    if (!isWorkflowStepCompleted(delegationStep.name)) {
+                        actions.push(
+                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
+                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" }
+                        );
+                    }
+                }
+            } else {
+                // Fallback to status-based logic if delegation step info is not available
+                if (request.status === "Pending Procurement Verification") {
+                    // Verification actions for delegated users
+                    actions.push(
+                        { type: "verify", label: "Verify (Delegated)", color: "green", icon: "✓" },
+                        { type: "reject", label: "Reject (Delegated)", color: "red", icon: "✗" }
+                    );
+                } else if (request.status === "Approved" || request.status === "Pending Procurement") {
+                    // Procurement order actions for delegated users
+                    actions.push(
+                        { type: "order", label: "Order (Delegated)", color: "green", icon: "📦" },
+                        { type: "cancel", label: "Cancel (Delegated)", color: "red", icon: "❌" }
+                    );
+                } else if (request.status === "Ordered") {
+                    // Delivery actions for delegated users
+                    actions.push(
+                        { type: "deliver", label: "Deliver (Delegated)", color: "purple", icon: "🚚" }
+                    );
+                } else if ((request.status === "Pending" || request.status === "Pending Approval") &&
+                           request.approval_workflow?.can_approve) {
+                    // Get current step category from workflow steps
+                    const currentStep = request.approval_workflow?.steps?.find(step => step.status === 'pending');
+                    const stepCategory = currentStep?.step_category;
+
+                    if (stepCategory === 'finance') {
+                        // Finance Approval step - can approve, reject, delay, and print bill
+                        actions.push(
+                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
+                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" },
+                            { type: "delay", label: "Delay Request (Delegated)", color: "yellow", icon: "⏰" }
+                        );
+                    } else {
+                        // Other steps - only approve and reject
+                        actions.push(
+                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
+                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" }
+                        );
+                    }
+                }
+            }
         }
 
         return actions;
@@ -1131,6 +1284,7 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
                 "Pending Procurement",
                 "Ordered",
                 "Delivered",
+                "Cancelled",
                 "Rejected",
             ].includes(request.status);
         }
@@ -1152,11 +1306,13 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
         // For other roles, check if they are assigned to workflow steps
         // This will be handled by the backend API
         return [
+            "Pending Procurement Verification",
             "Pending Approval",
             "Approved",
             "Pending Procurement",
             "Ordered",
             "Delivered",
+            "Cancelled",
             "Rejected",
         ].includes(request.status);
     };
@@ -1938,6 +2094,88 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
                             </div>
                         )}
 
+        {/* Approval Portal Actions */}
+        {isApprovalPortal && request.status === "Pending Approval" && (
+            <div className="bg-white shadow-sm rounded-lg p-6 mb-6">
+                <div className="border-l-4 border-blue-500 bg-blue-50 p-4 mb-6">
+                    <div className="flex">
+                        <div className="flex-shrink-0">
+                            <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                        </div>
+                        <div className="ml-3">
+                            <h3 className="text-sm font-medium text-blue-800">
+                                Approval Required
+                            </h3>
+                            <div className="mt-2 text-sm text-blue-700">
+                                <p>Your approval is required for this request. Please review the details and take action.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="mb-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Notes (Optional)
+                    </label>
+                    <textarea
+                        value={actionNotes}
+                        onChange={(e) => setActionNotes(e.target.value)}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                        placeholder="Add any notes or comments about this request..."
+                    />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <button
+                        onClick={() => handleApprovalAction('approve')}
+                        disabled={actionLoading}
+                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                        {actionLoading ? 'Processing...' : 'Approve Request'}
+                    </button>
+
+                    <button
+                        onClick={() => handleApprovalAction('reject')}
+                        disabled={actionLoading}
+                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                        {actionLoading ? 'Processing...' : 'Reject Request'}
+                    </button>
+
+                    <button
+                        onClick={() => handleApprovalAction('forward')}
+                        disabled={actionLoading}
+                        className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
+                        </svg>
+                        {actionLoading ? 'Processing...' : 'Forward Request'}
+                    </button>
+                </div>
+
+                <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
+                    <div className="flex">
+                        <svg className="w-5 h-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <div className="text-sm text-yellow-800">
+                            <strong>Important:</strong> This action cannot be undone. The request will be processed immediately.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
+
         {/* New Simplified Actions */}
         {[
             "Pending",
@@ -1945,7 +2183,7 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
             "Pending Procurement Verification",
             "Ordered",
             "Cancelled",
-        ].includes(request.status) && (
+        ].includes(request.status) && !isApprovalPortal && (
                             <div className="bg-white shadow-sm rounded-lg p-6">
                                 <h3 className="text-lg font-medium text-gray-900 mb-4">
                                     Actions
@@ -2219,7 +2457,8 @@ export default function RequestView({ auth, requestId, source = "requests" }) {
                                             </div>
                                         </div>
                                     ) : actionType === "approve" &&
-                                      auth.user?.id === 28 ? (
+                                      (auth.user?.id === 28 || request.delegation_info) &&
+                                      request.approval_workflow?.steps?.find(step => step.status === 'pending')?.step_category === 'finance' ? (
                                         <div className="space-y-4">
                                             <p className="text-sm text-gray-500 text-center">
                                                 Finance Approval with Bill

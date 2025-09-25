@@ -12,7 +12,7 @@ use App\Models\Request as RequestModel;
 use App\Models\User;
 use App\Models\ApprovalToken;
 
-class ApprovalNotificationMail extends Mailable
+class ApprovalNotificationMail extends Mailable implements ShouldQueue
 {
     use Queueable, SerializesModels;
 
@@ -62,7 +62,6 @@ class ApprovalNotificationMail extends Mailable
                 'approvalToken' => $this->approvalToken,
                 'actionType' => $this->actionType,
                 'approvalUrl' => $this->getApprovalUrl(),
-                'expiresAt' => $this->approvalToken->expires_at->format('M d, Y H:i'),
             ]
         );
     }
@@ -80,6 +79,6 @@ class ApprovalNotificationMail extends Mailable
      */
     private function getApprovalUrl(): string
     {
-        return url("/approval/{$this->approvalToken->token}");
+        return url("/approval-portal/{$this->approvalToken->token}");
     }
 }

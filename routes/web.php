@@ -162,3 +162,23 @@ Route::get('/approval/{token}', [ApprovalPortalController::class, 'show'])->name
 Route::post('/approval/{token}/process', [ApprovalPortalController::class, 'process'])->name('approval.process');
 Route::get('/approval/{token}/success', [ApprovalPortalController::class, 'success'])->name('approval.success');
 Route::get('/api/approval/{token}/details', [ApprovalPortalController::class, 'getRequestDetails'])->name('approval.details');
+
+// Approval Portal with RequestView (Redirect to main app)
+Route::get('/approval-portal/{token}', function($token) {
+    $approvalToken = \App\Models\ApprovalToken::where('token', $token)->first();
+
+    if (!$approvalToken || !$approvalToken->isValid()) {
+        return view('approval.invalid-token', [
+            'message' => 'Invalid or expired approval token'
+        ]);
+    }
+
+    return inertia('RequestView', [
+        'requestId' => $approvalToken->request_id,
+        'source' => 'approval',
+        'approvalToken' => $token,
+        'auth' => [
+            'user' => $approvalToken->approver ? $approvalToken->approver->load(['department', 'role']) : null
+        ]
+    ]);
+})->name('approval.portal.view');

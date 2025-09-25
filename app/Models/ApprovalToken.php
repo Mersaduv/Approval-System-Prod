@@ -38,7 +38,8 @@ class ApprovalToken extends Model
 
     public function isExpired()
     {
-        return $this->expires_at->isPast();
+        // Approval tokens never expire
+        return false;
     }
 
     public function isExhausted()
@@ -69,14 +70,14 @@ class ApprovalToken extends Model
         return bin2hex(random_bytes(32));
     }
 
-    public static function createToken($requestId, $approverId, $actionType = 'approve', $expiryHours = 48)
+    public static function createToken($requestId, $approverId, $actionType = 'approve', $expiryHours = null)
     {
         return self::create([
             'token' => self::generateToken(),
             'request_id' => $requestId,
             'approver_id' => $approverId,
             'action_type' => $actionType,
-            'expires_at' => Carbon::now()->addHours($expiryHours),
+            'expires_at' => null, // Never expires
             'max_usage' => 1,
             'usage_count' => 0,
             'is_used' => false

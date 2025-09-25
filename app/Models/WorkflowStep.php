@@ -18,6 +18,7 @@ class WorkflowStep extends Model
         'is_required',
         'conditions',
         'step_type',
+        'step_category',
         'timeout_hours',
         'auto_approve'
     ];

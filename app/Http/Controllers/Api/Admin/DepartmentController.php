@@ -30,7 +30,7 @@ class DepartmentController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Department::withCount(['users', 'approvalRules'])->with('role');
+        $query = Department::withCount(['users', 'approvalRules'])->with('roles');
 
         // Search by name
         if ($request->has('search')) {
@@ -53,7 +53,8 @@ class DepartmentController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:departments,name',
             'description' => 'nullable|string|max:1000',
-            'role_id' => 'required|exists:roles,id'
+            'role_ids' => 'required|array|min:1',
+            'role_ids.*' => 'exists:roles,id'
         ]);
 
         if ($validator->fails()) {
@@ -65,7 +66,16 @@ class DepartmentController extends Controller
         }
 
         try {
-            $department = Department::create($request->all());
+            $department = Department::create([
+                'name' => $request->name,
+                'description' => $request->description
+            ]);
+
+            // Attach roles
+            $department->roles()->attach($request->role_ids);
+
+            // Load the department with roles for response
+            $department->load('roles');
 
             return response()->json([
                 'success' => true,
@@ -90,7 +100,7 @@ class DepartmentController extends Controller
         $department = Department::withCount(['users', 'approvalRules'])
             ->with(['users' => function($query) {
                 $query->select('id', 'full_name', 'email', 'role', 'department_id');
-            }])
+            }, 'roles'])
             ->findOrFail($id);
 
         return response()->json([
@@ -109,7 +119,8 @@ class DepartmentController extends Controller
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255|unique:departments,name,' . $id,
             'description' => 'nullable|string|max:1000',
-            'role_id' => 'required|exists:roles,id'
+            'role_ids' => 'required|array|min:1',
+            'role_ids.*' => 'exists:roles,id'
         ]);
 
         if ($validator->fails()) {
@@ -121,7 +132,16 @@ class DepartmentController extends Controller
         }
 
         try {
-            $department->update($request->all());
+            $department->update([
+                'name' => $request->name,
+                'description' => $request->description
+            ]);
+
+            // Sync roles (this will remove old roles and add new ones)
+            $department->roles()->sync($request->role_ids);
+
+            // Load the department with roles for response
+            $department->load('roles');
 
             return response()->json([
                 'success' => true,
@@ -176,6 +196,33 @@ class DepartmentController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get departments by role
+     */
+    public function getByRole(Request $request): JsonResponse
+    {
+        $roleId = $request->get('role_id');
+
+        if (!$roleId) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Role ID is required'
+            ], 400);
+        }
+
+        $departments = Department::whereHas('roles', function($query) use ($roleId) {
+            $query->where('roles.id', $roleId);
+        })
+        ->with('roles')
+        ->orderBy('name')
+        ->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $departments
+        ]);
     }
 
     /**

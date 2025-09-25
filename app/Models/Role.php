@@ -34,7 +34,7 @@ class Role extends Model
 
     public function departments()
     {
-        return $this->hasMany(Department::class);
+        return $this->belongsToMany(Department::class, 'department_role');
     }
 
     public function hasPermission($permission)

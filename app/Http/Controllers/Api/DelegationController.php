@@ -424,7 +424,7 @@ class DelegationController extends Controller
     public function getWorkflowSteps(Request $request): JsonResponse
     {
         $user = $request->user();
-        $delegationType = $request->get('delegation_type', 'approval');
+        $delegationType = $request->get('delegation_type', 'all');
 
         try {
             // Get workflow steps where the user has assignments
@@ -442,6 +442,15 @@ class DelegationController extends Controller
                       ->orWhere(function ($deptQuery) use ($user) {
                           $deptQuery->where('assignable_type', 'App\\Models\\Department')
                                    ->where('assignable_id', $user->department_id);
+                      })
+                      // Or user assigned by FinanceAssignment
+                      ->orWhere(function ($financeQuery) use ($user) {
+                          $financeQuery->where('assignable_type', 'App\\Models\\FinanceAssignment')
+                                       ->whereIn('assignable_id', function($subQuery) use ($user) {
+                                           $subQuery->select('id')
+                                                   ->from('finance_assignments')
+                                                   ->where('user_id', $user->id);
+                                       });
                       });
                 });
             })
@@ -460,6 +469,11 @@ class DelegationController extends Controller
                         $isAssignedToUser = true;
                     } elseif ($assignment->assignable_type === 'App\\Models\\Department' && $assignment->assignable_id === $user->department_id) {
                         $isAssignedToUser = true;
+                    } elseif ($assignment->assignable_type === 'App\\Models\\FinanceAssignment') {
+                        $financeAssignment = \App\Models\FinanceAssignment::find($assignment->assignable_id);
+                        if ($financeAssignment && $financeAssignment->user_id === $user->id) {
+                            $isAssignedToUser = true;
+                        }
                     }
 
                     if (!$isAssignedToUser) {
@@ -488,13 +502,14 @@ class DelegationController extends Controller
                     'name' => $step->name,
                     'description' => $step->description,
                     'workflow_id' => $step->workflow_id,
-                    'step_order' => $step->step_order,
+                    'order_index' => $step->order_index,
                     'has_assignments' => $hasAssignments
                 ];
             })
             ->filter(function ($step) {
                 return $step['has_assignments'];
             })
+            ->sortBy('order_index')
             ->values();
 
             return response()->json([
