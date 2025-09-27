@@ -26,10 +26,11 @@ class SendRequestSubmittedNotification implements ShouldQueue
      */
     public function handle(RequestSubmitted $event): void
     {
-        // Only send notification to employee (no email)
-        $this->notificationService->sendEmployeeNotification(
+        // Only send in-app notification to employee (NO EMAIL for request creator)
+        $this->notificationService->sendInAppNotification(
             $event->request,
-            'submitted',
+            $event->request->employee->id,
+            'Request Submitted',
             'Your request has been submitted and is under review'
         );
 

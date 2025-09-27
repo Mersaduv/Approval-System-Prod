@@ -65,7 +65,7 @@ export default function Requests({ auth }) {
     };
 
     const filteredRequests = requests.filter(request => {
-        const employeeName = request.employee?.full_name || request.employee?.name || ''
+        const employeeName = request.employee?.full_name || request.employee?.name || `User Deleted (ID: ${request.employee_id})`
         const matchesSearch = request.item.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             employeeName.toLowerCase().includes(searchTerm.toLowerCase())
 
@@ -93,7 +93,17 @@ export default function Requests({ auth }) {
         return user && (user.role?.name === 'admin' || user.role?.name === 'manager' || user.role?.name === 'procurement')
     }
 
+    // Check if the request creator is soft-deleted (in trash)
+    const isRequestCreatorInTrash = (request) => {
+        return request?.employee?.deleted_at !== null && request?.employee?.deleted_at !== undefined;
+    }
+
     const getStatusColor = (status, request = null) => {
+        // Check if request creator is in trash - show as disabled
+        if (request && isRequestCreatorInTrash(request)) {
+            return 'bg-red-100 text-red-800';
+        }
+
         // Check if request is delayed
         if (request && isRequestDelayed(request)) {
             return 'bg-orange-100 text-orange-800';
@@ -119,6 +129,11 @@ export default function Requests({ auth }) {
     }
 
     const getStatusDisplayText = (status, request = null) => {
+        // Check if request creator is in trash - show as disabled
+        if (request && isRequestCreatorInTrash(request)) {
+            return "Disabled";
+        }
+
         // Check if request is delayed
         if (request && isRequestDelayed(request)) {
             return "Delayed";
@@ -270,10 +285,14 @@ export default function Requests({ auth }) {
                                                 #{request.id}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                                {request.employee?.full_name || 'N/A'}
+                                                {request.employee?.full_name || (
+                                                    <span className="text-red-600 italic">
+                                                        User Deleted (ID: {request.employee_id})
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                {request.employee?.department?.name || 'N/A'}
+                                                {request.employee?.department?.name || 'Not Available'}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                                 <div className="max-w-xs truncate" title={request.item}>
@@ -292,12 +311,18 @@ export default function Requests({ auth }) {
                                                 {new Date(request.created_at).toLocaleDateString()}
                                             </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                <Link
-                                                    href={`/requests/${request.id}`}
-                                                    className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs"
-                                                >
-                                                    View
-                                                </Link>
+                                                {isRequestCreatorInTrash(request) ? (
+                                                    <span className="text-gray-400 bg-gray-100 px-3 py-1 rounded-md text-xs cursor-not-allowed">
+                                                        Disabled
+                                                    </span>
+                                                ) : (
+                                                    <Link
+                                                        href={`/requests/${request.id}`}
+                                                        className="text-blue-600 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 px-3 py-1 rounded-md text-xs"
+                                                    >
+                                                        View
+                                                    </Link>
+                                                )}
                                             </td>
                                         </tr>
                                     ))
@@ -328,11 +353,11 @@ export default function Requests({ auth }) {
                                     <div className="space-y-2 text-sm">
                                         <div className="flex justify-between">
                                             <span className="text-gray-500">Employee:</span>
-                                            <span className="text-gray-900">{request.employee?.full_name || 'N/A'}</span>
+                                            <span className="text-gray-900">{request.employee?.full_name || `User Deleted (ID: ${request.employee_id})`}</span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-500">Department:</span>
-                                            <span className="text-gray-900">{request.employee?.department?.name || 'N/A'}</span>
+                                            <span className="text-gray-900">{request.employee?.department?.name || 'Not Available'}</span>
                                         </div>
                                         <div className="flex justify-between">
                                             <span className="text-gray-500">Amount:</span>
@@ -345,12 +370,18 @@ export default function Requests({ auth }) {
                                     </div>
 
                                     <div className="mt-4 pt-3 border-t border-gray-200">
-                                        <Link
-                                            href={`/requests/${request.id}`}
-                                            className="w-full bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center block"
-                                        >
-                                            View Details
-                                        </Link>
+                                        {isRequestCreatorInTrash(request) ? (
+                                            <span className="w-full bg-gray-100 text-gray-400 px-3 py-2 rounded-md text-xs font-medium text-center block cursor-not-allowed">
+                                                Disabled
+                                            </span>
+                                        ) : (
+                                            <Link
+                                                href={`/requests/${request.id}`}
+                                                className="w-full bg-blue-50 hover:bg-blue-100 text-blue-600 hover:text-blue-900 px-3 py-2 rounded-md text-xs font-medium text-center block"
+                                            >
+                                                View Details
+                                            </Link>
+                                        )}
                                     </div>
                                 </div>
                             ))

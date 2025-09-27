@@ -172,8 +172,8 @@ export default function ProcurementVerification({ auth }) {
                                                     </div>
                                                 </div>
                                                 <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
-                                                    <span>Employee: {request.employee.full_name}</span>
-                                                    <span>Department: {request.employee.department.name}</span>
+                                                    <span>Employee: {request.employee?.full_name || `User Deleted (ID: ${request.employee_id})`}</span>
+                                                    <span>Department: {request.employee?.department?.name || 'Not Available'}</span>
                                                     <span>Amount: {request.amount.toLocaleString()} AFN</span>
                                                     <span>Submitted: {new Date(request.created_at).toLocaleDateString()}</span>
                                                 </div>

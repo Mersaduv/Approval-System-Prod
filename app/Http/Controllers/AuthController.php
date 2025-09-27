@@ -41,6 +41,12 @@ class AuthController extends Controller
                 'email' => $request->email
             ]);
 
+            // Check if user was trying to access approval portal
+            $intended = $request->session()->get('url.intended');
+            if ($intended && str_contains($intended, '/approval-portal/')) {
+                return redirect($intended);
+            }
+
             // Return Inertia response for SPA
             return redirect()->intended('/');
         }

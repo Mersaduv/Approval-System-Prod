@@ -2,6 +2,7 @@ import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import { CardSkeleton } from '../Components/SkeletonLoader'
+import axios from 'axios'
 
 export default function Home({ auth }) {
     const [stats, setStats] = useState({
@@ -14,43 +15,39 @@ export default function Home({ auth }) {
     })
     const [recentRequests, setRecentRequests] = useState([])
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState(null)
+
+    const fetchDashboardData = async () => {
+        setLoading(true)
+        setError(null)
+        try {
+            const response = await axios.get('/api/dashboard/stats')
+            if (response.data.success) {
+                setStats(response.data.data.stats)
+                setRecentRequests(response.data.data.recentRequests)
+            } else {
+                setError('Failed to fetch dashboard data')
+            }
+        } catch (error) {
+            console.error('Error fetching dashboard data:', error)
+            setError('Error loading dashboard data. Please try again.')
+            // Fallback to empty data on error
+            setStats({
+                totalRequests: 0,
+                pendingRequests: 0,
+                approvedRequests: 0,
+                rejectedRequests: 0,
+                myRequests: 0,
+                pendingApprovals: 0
+            })
+            setRecentRequests([])
+        } finally {
+            setLoading(false)
+        }
+    }
 
     useEffect(() => {
-        // Simulate API call
-        setTimeout(() => {
-            setStats({
-                totalRequests: 156,
-                pendingRequests: 23,
-                approvedRequests: 98,
-                rejectedRequests: 35,
-                myRequests: 12,
-                pendingApprovals: 5
-            })
-            setRecentRequests([
-                {
-                    id: 1,
-                    item: 'Office Supplies',
-                    amount: 1500,
-                    status: 'Pending',
-                    created_at: '2024-01-15'
-                },
-                {
-                    id: 2,
-                    item: 'Laptop Computer',
-                    amount: 8500,
-                    status: 'Approved',
-                    created_at: '2024-01-14'
-                },
-                {
-                    id: 3,
-                    item: 'Conference Equipment',
-                    amount: 3200,
-                    status: 'Rejected',
-                    created_at: '2024-01-13'
-                }
-            ])
-            setLoading(false)
-        }, 1000)
+        fetchDashboardData()
     }, [])
 
     const isRequestDelayed = (request) => {
@@ -73,7 +70,17 @@ export default function Home({ auth }) {
         return !financeApprovalCompleted;
     };
 
+    // Check if the request creator is soft-deleted (in trash)
+    const isRequestCreatorInTrash = (request) => {
+        return request?.employee?.deleted_at !== null && request?.employee?.deleted_at !== undefined;
+    };
+
     const getStatusColor = (status, request = null) => {
+        // Check if request creator is in trash - show as disabled
+        if (request && isRequestCreatorInTrash(request)) {
+            return 'bg-red-100 text-red-800';
+        }
+
         // Check if request is delayed
         if (request && isRequestDelayed(request)) {
             return 'bg-orange-100 text-orange-800';
@@ -93,6 +100,11 @@ export default function Home({ auth }) {
     }
 
     const getStatusDisplayText = (status, request = null) => {
+        // Check if request creator is in trash - show as disabled
+        if (request && isRequestCreatorInTrash(request)) {
+            return "Disabled";
+        }
+
         // Check if request is delayed
         if (request && isRequestDelayed(request)) {
             return "Delayed (Waiting for finance Approval)";
@@ -114,10 +126,26 @@ export default function Home({ auth }) {
         <AppLayout title="Home" auth={auth}>
             <div className="space-y-6">
                 {/* Header */}
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-                    <p className="text-gray-600 mt-1">Welcome back! Here's what's happening with your requests.</p>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+                        <p className="text-gray-600 mt-1">Welcome back! Here's what's happening with your requests.</p>
+                    </div>
                 </div>
+
+                {/* Error Message */}
+                {error && (
+                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+                        <div className="flex">
+                            <div className="flex-shrink-0">
+                                <span className="text-red-400">⚠️</span>
+                            </div>
+                            <div className="ml-3">
+                                <p className="text-sm text-red-800">{error}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 lg:gap-6 mb-8">
@@ -288,38 +316,11 @@ export default function Home({ auth }) {
                             </Link>
                         )}
 
-                        {/* Notifications - Available for all users */}
-                        <Link
-                            href="/notifications"
-                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                            <div className="p-2 bg-yellow-100 rounded-lg mr-3">
-                                <span className="text-lg lg:text-xl">🔔</span>
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <p className="font-medium text-gray-900 text-sm lg:text-base">Notifications</p>
-                                <p className="text-xs lg:text-sm text-gray-500">View notifications</p>
-                            </div>
-                        </Link>
-
-                        {/* Reports - Available for all users */}
-                        <Link
-                            href="/reports"
-                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                            <div className="p-2 bg-purple-100 rounded-lg mr-3">
-                                <span className="text-lg lg:text-xl">📊</span>
-                            </div>
-                            <div className="min-w-0 flex-1">
-                                <p className="font-medium text-gray-900 text-sm lg:text-base">Reports</p>
-                                <p className="text-xs lg:text-sm text-gray-500">Generate reports</p>
-                            </div>
-                        </Link>
                     </div>
                 </div>
 
                 {/* Recent Requests */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
+                <div className="grid grid-cols-1 lg:grid-cols-1 gap-6 lg:gap-8">
                     <div className="bg-white rounded-lg shadow-sm">
                         <div className="px-4 lg:px-6 py-4 border-b border-gray-200">
                             <div className="flex items-center justify-between">
@@ -354,7 +355,7 @@ export default function Home({ auth }) {
                                                     {request.item}
                                                 </p>
                                                 <p className="text-sm text-gray-500">
-                                                    {request.amount.toLocaleString()} AFN
+                                                    {request.amount.toLocaleString()} AFN • {request.employee_name}
                                                 </p>
                                             </div>
                                             <div className="flex items-center space-x-2">
@@ -365,36 +366,6 @@ export default function Home({ auth }) {
                                         </div>
                                     ))
                                 )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* System Status */}
-                    <div className="bg-white rounded-lg shadow-sm">
-                        <div className="px-4 lg:px-6 py-4 border-b border-gray-200">
-                            <h3 className="text-base lg:text-lg font-medium text-gray-900">System Status</h3>
-                        </div>
-                        <div className="p-4 lg:p-6">
-                            <div className="space-y-4">
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-600">System Health</span>
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                        <span className="w-2 h-2 bg-green-400 rounded-full mr-1"></span>
-                                        Operational
-                                    </span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-600">Last Backup</span>
-                                    <span className="text-sm text-gray-900">2 hours ago</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-600">Active Users</span>
-                                    <span className="text-sm text-gray-900">24</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-600">Uptime</span>
-                                    <span className="text-sm text-gray-900">99.9%</span>
-                                </div>
                             </div>
                         </div>
                     </div>

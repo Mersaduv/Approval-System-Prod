@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ApprovalPortalController;
 
 /*
@@ -60,20 +61,9 @@ Route::middleware('auth')->group(function () {
             ]
         ]);
     });
-    Route::get('/notifications', function () {
-        return inertia('Notifications', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    });
-    Route::get('/reports', function () {
-        return inertia('Reports', [
-            'auth' => [
-                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
-            ]
-        ]);
-    });
+    Route::get('/profile', [ProfileController::class, 'index']);
+    Route::post('/profile/update', [ProfileController::class, 'updateProfile'])->name('profile.update');
+    Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
     Route::get('/users', function () {
         return inertia('Users', [
             'auth' => [
@@ -87,7 +77,7 @@ Route::middleware('auth')->group(function () {
                 'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]
         ]);
-    });
+    })->middleware('admin');
     Route::get('/workflow-settings', function () {
         return inertia('WorkflowSettings', [
             'auth' => [
@@ -104,6 +94,23 @@ Route::middleware('auth')->group(function () {
     });
     Route::get('/procurement/verification', function () {
         return inertia('ProcurementVerification', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+
+    // Admin routes
+    Route::get('/admin/users', function () {
+        return inertia('Users', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+
+    Route::get('/admin/users/trash', function () {
+        return inertia('UserTrash', [
             'auth' => [
                 'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
             ]
@@ -176,9 +183,8 @@ Route::get('/approval-portal/{token}', function($token) {
     return inertia('RequestView', [
         'requestId' => $approvalToken->request_id,
         'source' => 'approval',
-        'approvalToken' => $token,
         'auth' => [
             'user' => $approvalToken->approver ? $approvalToken->approver->load(['department', 'role']) : null
         ]
     ]);
-})->name('approval.portal.view');
+})->name('approval.portal.view')->middleware('auth');

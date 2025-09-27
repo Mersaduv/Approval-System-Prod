@@ -238,7 +238,7 @@ class WorkflowService
             try {
                 $this->executeWorkflowStepForExistingRequest($request);
                 Log::info("Executed workflow step for request #{$request->id}");
-            } catch (Exception $e) {
+            } catch (\Exception $e) {
                 Log::error("Failed to execute workflow step for request #{$request->id}: " . $e->getMessage());
             }
         }
@@ -256,7 +256,7 @@ class WorkflowService
 
             // Use cached user lookup
             $procurementUser = Cache::remember("user_{$procurementUserId}", 300, function () use ($procurementUserId) {
-                return User::select('id', 'full_name', 'role_id')->with('role:id,name')->find($procurementUserId);
+                return User::withoutTrashed()->select('id', 'full_name', 'role_id')->with('role:id,name')->find($procurementUserId);
             });
 
             // Check if user has procurement role or delegation access (cached check)
@@ -291,11 +291,17 @@ class WorkflowService
                 // Log: مرحله Procurement Verification تکمیل شده
                 $this->logAction($procurementUserId, $requestId, 'Workflow Step Completed', "Procurement Verification - Status: {$status}" . ($notes ? " - {$notes}" : ""));
 
+                // Send workflow step update notification to request creator
+                $this->notificationService->sendWorkflowStepUpdate(
+                    $request,
+                    'Procurement Verification',
+                    'verified',
+                    $procurementUser->full_name,
+                    $notes
+                );
+
                 // Start the approval workflow (optimized)
                 $this->processApprovalWorkflowOptimized($request);
-
-                // Notify employee that request is verified and sent for approval
-                $this->notificationService->sendEmployeeNotification($request, 'procurement_verified');
             } elseif ($status === 'Not Available' || $status === 'Rejected') {
                 // Update request status to rejected
                 $updateData['status'] = 'Rejected';
@@ -309,8 +315,14 @@ class WorkflowService
                     "Procurement Verification - {$procurementUser->full_name} rejected: " . ($notes ?: 'No reason provided')
                 );
 
-                // Notify employee that request was rejected by procurement
-                $this->notificationService->sendEmployeeNotification($request, 'procurement_rejected', $notes);
+                // Send workflow step update notification to request creator
+                $this->notificationService->sendWorkflowStepUpdate(
+                    $request,
+                    'Procurement Verification',
+                    'rejected',
+                    $procurementUser->full_name,
+                    $notes
+                );
             } else {
                 // Just update the procurement status
                 $request->update($updateData);
@@ -412,7 +424,7 @@ class WorkflowService
 
         // Cache employee data to avoid repeated queries
         $employee = Cache::remember("employee_{$request->employee_id}", 300, function () use ($request) {
-            return User::select('id', 'role_id', 'department_id')->with('role:id,name')->find($request->employee_id);
+            return User::withoutTrashed()->select('id', 'role_id', 'department_id')->with('role:id,name')->find($request->employee_id);
         });
 
         // Check if the request creator is admin or procurement
@@ -592,7 +604,7 @@ class WorkflowService
         }
 
         // Mark step as completed and move to next
-        $this->markStepCompleted($request, $step);
+        $this->markStepCompleted($request, $step, 1); // System user
         $this->processNextWorkflowStep($request, WorkflowStep::getStepsForRequest($request));
     }
 
@@ -682,11 +694,11 @@ class WorkflowService
                 return $assignment->assignable_id;
             case 'App\\Models\\Role':
                 // Get first user with this role
-                $user = User::where('role_id', $assignment->assignable_id)->first();
+                $user = User::withoutTrashed()->where('role_id', $assignment->assignable_id)->first();
                 return $user ? $user->id : null;
             case 'App\\Models\\Department':
                 // Get first user from this department
-                $user = User::where('department_id', $assignment->assignable_id)->first();
+                $user = User::withoutTrashed()->where('department_id', $assignment->assignable_id)->first();
                 return $user ? $user->id : null;
             default:
                 return null;
@@ -910,9 +922,27 @@ class WorkflowService
     /**
      * Mark step as completed
      */
-    private function markStepCompleted(RequestModel $request, WorkflowStep $step): void
+    private function markStepCompleted(RequestModel $request, WorkflowStep $step, int $approverId = null): void
     {
         $this->logAction(1, $request->id, 'Step completed', "Step completed: {$step->name} (Step ID: {$step->id})");
+
+        // Get approver info if available
+        $performerName = 'System';
+        if ($approverId) {
+            $approver = \App\Models\User::withoutTrashed()->find($approverId);
+            if ($approver) {
+                $performerName = $approver->full_name;
+            }
+        }
+
+        // Send notification to request creator about step completion
+        $this->notificationService->sendWorkflowStepUpdate(
+            $request,
+            $step->name,
+            'completed',
+            $performerName,
+            "Step '{$step->name}' has been completed successfully"
+        );
     }
 
 
@@ -921,7 +951,7 @@ class WorkflowService
      */
     private function markCurrentStepCompleted(RequestModel $request, int $approverId, $currentStep = null): void
     {
-        $approver = User::findOrFail($approverId);
+        $approver = User::withoutTrashed()->findOrFail($approverId);
 
         // Use the provided step or get the current step that was actually approved
         if (!$currentStep) {
@@ -935,6 +965,15 @@ class WorkflowService
                 $request->id,
                 'Step completed',
                 "Step completed: {$currentStep->name} by {$approver->full_name} (Step ID: {$currentStep->id})"
+            );
+
+            // Send notification to request creator about step completion
+            $this->notificationService->sendWorkflowStepUpdate(
+                $request,
+                $currentStep->name,
+                'completed',
+                $approver->full_name,
+                "Step '{$currentStep->name}' has been completed by {$approver->full_name}"
             );
         }
     }
@@ -982,7 +1021,7 @@ class WorkflowService
      */
     private function markCurrentStepRejected(RequestModel $request, int $rejectorId): void
     {
-        $rejector = User::findOrFail($rejectorId);
+        $rejector = User::withoutTrashed()->findOrFail($rejectorId);
         $steps = WorkflowStep::getStepsForRequest($request);
 
         foreach ($steps as $step) {
@@ -1021,6 +1060,14 @@ class WorkflowService
     private function processLegacyWorkflow(RequestModel $request): void
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            // Log the issue and skip processing
+            Log::warning("Cannot process workflow for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         $department = $employee->department;
         $amount = $request->amount;
 
@@ -1052,6 +1099,14 @@ class WorkflowService
      */
     private function processEmployeeWorkflow(RequestModel $request): void
     {
+        $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            Log::warning("Cannot process employee workflow for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         $amount = $request->amount;
 
         // Get thresholds from settings
@@ -1077,6 +1132,13 @@ class WorkflowService
     private function processDefaultWorkflow(RequestModel $request): void
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            Log::warning("Cannot process default workflow for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         $amount = $request->amount;
 
         // Get thresholds from settings
@@ -1128,7 +1190,7 @@ class WorkflowService
         // For sequential approval, only send to the first approver in the chain
         $firstRule = $rules->first();
         if ($firstRule) {
-            $approver = $this->getApproverByRole($firstRule->approver_role, $request->employee->department_id);
+            $approver = $this->getApproverByRole($firstRule->approver_role, $request->employee ? $request->employee->department_id : null);
             if ($approver) {
                 $this->sendApprovalRequest($request, $approver, "Approval required from {$firstRule->approver_role}");
             }
@@ -1143,7 +1205,7 @@ class WorkflowService
     {
         return DB::transaction(function () use ($requestId, $approverId, $notes) {
             $request = RequestModel::findOrFail($requestId);
-            $approver = User::findOrFail($approverId);
+            $approver = User::withoutTrashed()->findOrFail($approverId);
 
             // Check if this approver can approve this request
             if (!$this->canApprove($request, $approver)) {
@@ -1166,7 +1228,7 @@ class WorkflowService
             // Check if the current step is now completed (all required assignments approved)
             if ($currentStep && $this->isStepCompleted($request, $currentStep)) {
                 // Mark the step as completed
-                $this->markStepCompleted($request, $currentStep);
+                $this->markStepCompleted($request, $currentStep, $approverId);
 
                 // Process next workflow step
                 $this->processNextWorkflowStep($request, WorkflowStep::getStepsForRequest($request));
@@ -1198,7 +1260,7 @@ class WorkflowService
     {
         return DB::transaction(function () use ($requestId, $rejectorId, $reason) {
             $request = RequestModel::findOrFail($requestId);
-            $rejector = User::findOrFail($rejectorId);
+            $rejector = User::withoutTrashed()->findOrFail($rejectorId);
 
             // Get current step information
             $currentStep = $this->getCurrentStepForApprover($request, $rejector);
@@ -1285,7 +1347,13 @@ class WorkflowService
             // Update request status based on procurement decision
             if ($status === 'Pending Procurement') {
                 $request->update(['status' => 'Pending Procurement']);
-                $this->notificationService->sendEmployeeNotification($request, 'procurement_started');
+                $this->notificationService->sendWorkflowStepUpdate(
+                    $request,
+                    'Procurement order',
+                    'started',
+                    $procurementUser->full_name,
+                    $notes
+                );
             } elseif ($status === 'Ordered') {
                 // If request was in Pending Approval, first approve it, then set to Ordered
                 if ($request->status === 'Pending Approval') {
@@ -1294,10 +1362,22 @@ class WorkflowService
                     $this->completeCurrentWorkflowStep($request, $procurementUserId, 'approved');
                 }
                 $request->update(['status' => 'Ordered']);
-                $this->notificationService->sendEmployeeNotification($request, 'ordered');
+                $this->notificationService->sendWorkflowStepUpdate(
+                    $request,
+                    'Procurement order',
+                    'ordered',
+                    $procurementUser->full_name,
+                    $notes
+                );
             } elseif ($status === 'Delivered') {
                 $request->update(['status' => 'Delivered']);
-                $this->notificationService->sendEmployeeNotification($request, 'delivered');
+                $this->notificationService->sendWorkflowStepUpdate(
+                    $request,
+                    'Procurement order',
+                    'delivered',
+                    $procurementUser->full_name,
+                    $notes
+                );
             } elseif ($status === 'Cancelled') {
                 // If request was in Pending Approval, first approve it, then set to Cancelled
                 if ($request->status === 'Pending Approval') {
@@ -1306,7 +1386,13 @@ class WorkflowService
                     $this->completeCurrentWorkflowStep($request, $procurementUserId, 'approved');
                 }
                 $request->update(['status' => 'Cancelled']);
-                $this->notificationService->sendEmployeeNotification($request, 'cancelled', $notes);
+                $this->notificationService->sendWorkflowStepUpdate(
+                    $request,
+                    'Procurement order',
+                    'cancelled',
+                    $procurementUser->full_name,
+                    $notes
+                );
 
                 // Log the cancellation action
                 $this->logAction($procurementUserId, $requestId, 'Workflow Step Cancelled', "Procurement order cancelled: " . ($notes ?: 'No reason provided'));
@@ -1527,6 +1613,13 @@ class WorkflowService
     private function processLegacyNextApproval(RequestModel $request): void
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            Log::warning("Cannot process legacy next approval for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         $amount = $request->amount;
         $department = $employee->department;
 
@@ -1567,6 +1660,12 @@ class WorkflowService
     {
         $employee = $request->employee;
 
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            Log::warning("Cannot process next dynamic approval for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         // Find the next approver in the sequence
         foreach ($rules as $rule) {
             $approver = $this->getApproverByRole($rule->approver_role, $employee->department_id);
@@ -1583,6 +1682,13 @@ class WorkflowService
     private function processNextDefaultApproval(RequestModel $request): void
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            Log::warning("Cannot process next default approval for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         $amount = $request->amount;
 
         // Get thresholds from settings
@@ -1685,7 +1791,7 @@ class WorkflowService
         $systemUserId = 999;
 
         // Check if user is admin or manager by role, not just by ID
-        $user = User::find($userId);
+        $user = User::withoutTrashed()->find($userId);
         $isAdminOrManager = $user && $user->role && in_array($user->role->name, ['admin', 'manager']);
 
         AuditLog::create([
@@ -1701,7 +1807,8 @@ class WorkflowService
      */
     private function getDepartmentManager(int $departmentId): ?User
     {
-        return User::where('department_id', $departmentId)
+        return User::withoutTrashed()
+            ->where('department_id', $departmentId)
             ->whereHas('role', function($query) {
                 $query->where('name', Role::MANAGER);
             })
@@ -1710,36 +1817,41 @@ class WorkflowService
 
     private function getAdmin(): ?User
     {
-        return User::whereHas('role', function($query) {
-            $query->where('name', Role::ADMIN);
-        })->first();
+        return User::withoutTrashed()
+            ->whereHas('role', function($query) {
+                $query->where('name', Role::ADMIN);
+            })->first();
     }
 
     private function getApproverByRole(string $role, int $departmentId): ?User
     {
         if ($role === 'Manager' || $role === Role::MANAGER) {
-            return User::whereHas('role', function($query) {
-                $query->where('name', Role::MANAGER);
-            })
-            ->where('department_id', $departmentId)
-            ->first();
+            return User::withoutTrashed()
+                ->whereHas('role', function($query) {
+                    $query->where('name', Role::MANAGER);
+                })
+                ->where('department_id', $departmentId)
+                ->first();
         } elseif ($role === 'Admin' || $role === Role::ADMIN) {
-            return User::whereHas('role', function($query) {
-                $query->where('name', Role::ADMIN);
-            })->first();
+            return User::withoutTrashed()
+                ->whereHas('role', function($query) {
+                    $query->where('name', Role::ADMIN);
+                })->first();
         } elseif ($role === 'Procurement' || $role === Role::PROCUREMENT) {
-            return User::whereHas('role', function($query) {
-                $query->where('name', Role::PROCUREMENT);
-            })->first();
+            return User::withoutTrashed()
+                ->whereHas('role', function($query) {
+                    $query->where('name', Role::PROCUREMENT);
+                })->first();
         }
         return null;
     }
 
     private function getProcurementUsers(): \Illuminate\Database\Eloquent\Collection
     {
-        return User::whereHas('role', function($query) {
-            $query->where('name', Role::PROCUREMENT);
-        })->get();
+        return User::withoutTrashed()
+            ->whereHas('role', function($query) {
+                $query->where('name', Role::PROCUREMENT);
+            })->get();
     }
 
     public function canApprove(RequestModel $request, User $approver): bool
@@ -1784,7 +1896,7 @@ class WorkflowService
             return true;
         } elseif ($approver->isManager()) {
             // Check if approver is from the same department as the employee
-            return $approver->department_id === $employee->department_id;
+            return $employee && $approver->department_id === $employee->department_id;
         } elseif ($approver->isProcurement()) {
             // Check if approver is assigned to this request in workflow steps
             return $this->isUserAssignedToRequest($request, $approver);
@@ -1857,7 +1969,7 @@ class WorkflowService
                 $query->whereHas('role', function($roleQuery) {
                     $roleQuery->where('name', Role::MANAGER);
                 })
-                ->where('department_id', $request->employee->department_id);
+                ->where('department_id', $request->employee ? $request->employee->department_id : null);
             })
             ->exists();
     }
@@ -1906,21 +2018,35 @@ class WorkflowService
      */
     private function completeCurrentWorkflowStep(RequestModel $request, int $userId, string $action): void
     {
+        $user = User::withoutTrashed()->find($userId);
+        $stepName = 'Unknown Step';
+
         // Check if approval_workflow exists
         if (!$request->approval_workflow) {
+            $stepName = 'Procurement order';
             // Log the workflow step completion without workflow data
-            $this->logAction($userId, $request->id, 'Workflow Step Completed', "Step completed: Procurement order - {$action}");
-            return;
+            $this->logAction($userId, $request->id, 'Workflow Step Completed', "Step completed: {$stepName} - {$action}");
+        } else {
+            $stepName = $request->approval_workflow->waiting_for ?? 'Unknown Step';
+            // Log the workflow step completion
+            $this->logAction($userId, $request->id, 'Workflow Step Completed', "Step completed: {$stepName} - {$action}");
+
+            // Update workflow status
+            $request->approval_workflow->update([
+                'waiting_for' => null,
+                'can_approve' => false
+            ]);
         }
 
-        // Log the workflow step completion
-        $this->logAction($userId, $request->id, 'Workflow Step Completed', "Step completed: {$request->approval_workflow->waiting_for} - {$action}");
-
-        // Update workflow status
-        $request->approval_workflow->update([
-            'waiting_for' => null,
-            'can_approve' => false
-        ]);
+        // Send workflow step update notification to request creator
+        if ($user) {
+            $this->notificationService->sendWorkflowStepUpdate(
+                $request,
+                $stepName,
+                $action,
+                $user->full_name
+            );
+        }
     }
 
     /**
@@ -1953,7 +2079,7 @@ class WorkflowService
                 ->where('workflow_step_id', $step->id) // Only specific step delegations
                 ->where(function ($query) use ($request) {
                     $query->whereNull('department_id')
-                        ->orWhere('department_id', $request->employee->department_id);
+                        ->orWhere('department_id', $request->employee ? $request->employee->department_id : null);
                 })
                 ->where(function ($query) {
                     $query->whereNull('starts_at')
@@ -2255,7 +2381,7 @@ class WorkflowService
         }
 
         // Mark step as completed and move to next
-        $this->markStepCompleted($request, $step);
+        $this->markStepCompleted($request, $step, 1); // System user
         $this->processNextWorkflowStepOptimized($request, CacheService::getActiveWorkflowSteps());
     }
 
@@ -2276,7 +2402,7 @@ class WorkflowService
                     ->where('workflow_step_id', $step->id)
                     ->where(function ($query) use ($request) {
                         $query->whereNull('department_id')
-                            ->orWhere('department_id', $request->employee->department_id);
+                            ->orWhere('department_id', $request->employee ? $request->employee->department_id : null);
                     })
                     ->where(function ($query) {
                         $query->whereNull('starts_at')
@@ -2411,6 +2537,14 @@ class WorkflowService
      */
     private function processEmployeeWorkflowOptimized(RequestModel $request): void
     {
+        $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            Log::warning("Cannot process employee workflow for request {$request->id}: employee has been deleted");
+            return;
+        }
+
         $amount = $request->amount;
 
         // Get thresholds from settings (cached)
@@ -2441,7 +2575,7 @@ class WorkflowService
     private function processDefaultWorkflowOptimized(RequestModel $request): void
     {
         $employee = Cache::remember("employee_{$request->employee_id}", 300, function () use ($request) {
-            return User::select('id', 'role_id', 'department_id')->with('role:id,name')->find($request->employee_id);
+            return User::withoutTrashed()->select('id', 'role_id', 'department_id')->with('role:id,name')->find($request->employee_id);
         });
 
         $amount = $request->amount;

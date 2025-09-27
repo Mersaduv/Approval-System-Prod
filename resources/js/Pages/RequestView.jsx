@@ -5,7 +5,7 @@ import axios from "axios";
 import AlertModal from "../Components/AlertModal";
 import AuditTrailGraph from "../Components/AuditTrailGraph";
 
-export default function RequestView({ auth, requestId, source = "requests", approvalToken = null }) {
+export default function RequestView({ auth, requestId, source = "requests" }) {
     const [request, setRequest] = useState(null);
     const [loading, setLoading] = useState(true);
     const [showActionModal, setShowActionModal] = useState(false);
@@ -36,8 +36,6 @@ export default function RequestView({ auth, requestId, source = "requests", appr
         delay_reason: "",
     });
 
-    // Approval Portal Mode
-    const isApprovalPortal = source === "approval" && approvalToken;
 
     const showAlertMessage = (message, type = "info") => {
         setAlertMessage(message);
@@ -476,13 +474,17 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                     <div class="info-row">
                         <span class="info-label">Employee:</span>
                         <span class="info-value">${
-                            request.employee?.full_name || "N/A"
+                            request.employee?.full_name || (
+                                <span className="text-red-600 italic">
+                                    User Deleted (ID: {request.employee_id})
+                                </span>
+                            )
                         }</span>
                     </div>
                     <div class="info-row">
                         <span class="info-label">Department:</span>
                         <span class="info-value">${
-                            request.employee?.department?.name || "N/A"
+                            request.employee?.department?.name || "Not Available"
                         }</span>
                     </div>
                     <div class="info-row">
@@ -733,32 +735,6 @@ export default function RequestView({ auth, requestId, source = "requests", appr
         }
     };
 
-    // Approval Portal Actions
-    const handleApprovalAction = async (action) => {
-        if (!approvalToken) return;
-
-        setActionLoading(true);
-        try {
-            const response = await axios.post(`/approval/${approvalToken}/process`, {
-                action: action,
-                notes: actionNotes,
-                _token: document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-            });
-
-            if (response.data.success) {
-                showAlertMessage(response.data.message, "success");
-                setTimeout(() => {
-                    window.location.href = `/approval/${approvalToken}/success`;
-                }, 2000);
-            } else {
-                showAlertMessage(response.data.message, "error");
-            }
-        } catch (error) {
-            showAlertMessage("An error occurred while processing your request", "error");
-        } finally {
-            setActionLoading(false);
-        }
-    };
 
     const handleAction = (action, request = null) => {
         setActionType(action);
@@ -891,7 +867,7 @@ export default function RequestView({ auth, requestId, source = "requests", appr
             if (actionType === "approve") {
                 // Check if this is a Finance-specific step
                 const currentStep = request.approval_workflow?.steps?.find(step => step.status === 'pending');
-                const isFinanceStep = currentStep?.step_category === 'finance';
+                const isFinanceStep = currentStep?.step_category === 'finance' || currentStep?.name === 'Finance Approval';
 
                 if ((auth.user?.id === 28 || request.delegation_info) && isFinanceStep) {
                     // For Finance users or delegated users in Finance-specific steps, first print bill then approve
@@ -1028,11 +1004,32 @@ export default function RequestView({ auth, requestId, source = "requests", appr
         );
     };
 
+    // Check if the request creator is soft-deleted (in trash)
+    const isRequestCreatorInTrash = () => {
+        return request?.employee?.deleted_at !== null && request?.employee?.deleted_at !== undefined;
+    };
+
+    // Helper function to prevent duplicate actions
+    const addActionIfNotExists = (actions, newAction) => {
+        const exists = actions.some(action =>
+            action.type === newAction.type &&
+            action.label === newAction.label
+        );
+        if (!exists) {
+            actions.push(newAction);
+        }
+    };
+
     const getAvailableActions = () => {
         const user = auth.user;
         if (!user || !request) return [];
 
         const actions = [];
+
+        // Check if request creator is in trash - if so, disable all actions
+        if (isRequestCreatorInTrash()) {
+            return actions;
+        }
 
         // Check if user has already approved/rejected
         if (hasUserAlreadyApprovedOrRejected()) {
@@ -1054,56 +1051,44 @@ export default function RequestView({ auth, requestId, source = "requests", appr
             user.department?.name !== "Finance" &&
             (request.status === "Pending" || request.status === "Pending Approval") &&
             request.approval_workflow?.can_approve) {
-            actions.push(
-                { type: "approve", label: "Approve Request", color: "green", icon: "✓" },
-                { type: "reject", label: "Reject Request", color: "red", icon: "✗" }
-            );
+            addActionIfNotExists(actions, { type: "approve", label: "Approve Request", color: "green", icon: "✓" });
+            addActionIfNotExists(actions, { type: "reject", label: "Reject Request", color: "red", icon: "✗" });
         }
 
         // Admin Approval Actions
         if (user.role?.name === "admin" &&
             (request.status === "Pending" || request.status === "Pending Approval") &&
             request.approval_workflow?.can_approve) {
-            actions.push(
-                { type: "approve", label: "Approve Request", color: "green", icon: "✓" },
-                { type: "reject", label: "Reject Request", color: "red", icon: "✗" }
-            );
+            addActionIfNotExists(actions, { type: "approve", label: "Approve Request", color: "green", icon: "✓" });
+            addActionIfNotExists(actions, { type: "reject", label: "Reject Request", color: "red", icon: "✗" });
         }
 
-        // Finance Manager Approval Actions - Based on step category
-        if (user.role?.name === "manager" &&
-            user.department?.name === "Finance" &&
-            request.status === "Pending Approval" &&
-            request.approval_workflow?.can_approve) {
-
-            // Get current step category from workflow steps
+        // Check if user is assigned to current workflow step
+        if (request.status === "Pending Approval" && request.approval_workflow?.can_approve) {
             const currentStep = request.approval_workflow?.steps?.find(step => step.status === 'pending');
-            const stepCategory = currentStep?.step_category;
+            const isUserAssignedToStep = currentStep?.assigned_users?.some(assignedUser => assignedUser.id === user.id);
 
-            if (stepCategory === 'manager') {
-                // Manager Approval step - only approve and reject, no delay or bill printing
-                actions.push(
-                    { type: "approve", label: "Approve Request", color: "green", icon: "✓" },
-                    { type: "reject", label: "Reject Request", color: "red", icon: "✗" }
-                );
-            } else if (stepCategory === 'finance') {
-                // Finance Approval step - can approve, reject, delay, and print bill
-                actions.push(
-                    { type: "finance-approve", label: "Approve Request", color: "green", icon: "✓" },
-                    { type: "reject", label: "Reject Request", color: "red", icon: "✗" },
-                    { type: "delay", label: "Delay Request", color: "yellow", icon: "⏰" },
-                );
+            if (isUserAssignedToStep) {
+                // Check step name to determine appropriate actions
+                if (currentStep?.name === "Finance Approval") {
+                    // Finance Approval step - can approve, reject, delay, and print bill
+                    actions.push(
+                        { type: "finance-approve", label: "Approve Request", color: "green", icon: "✓" },
+                        { type: "reject", label: "Reject Request", color: "red", icon: "✗" },
+                        { type: "delay", label: "Delay Request", color: "yellow", icon: "⏰" },
+                    );
+                } else if (currentStep?.name === "Procurement order") {
+                    // Procurement Order step - can order or cancel
+                    actions.push(
+                        { type: "order", label: "Order", color: "green", icon: "📦" },
+                        { type: "cancel", label: "Cancel", color: "red", icon: "❌" }
+                    );
+                } else {
+                    // Other approval steps - standard approve/reject
+                    addActionIfNotExists(actions, { type: "approve", label: "Approve Request", color: "green", icon: "✓" });
+                    addActionIfNotExists(actions, { type: "reject", label: "Reject Request", color: "red", icon: "✗" });
+                }
             }
-        }
-
-        // Procurement Order Actions
-        if (user.role?.name === "procurement" &&
-            request.approval_workflow?.waiting_for === "Procurement order" &&
-            request.approval_workflow?.can_approve) {
-            actions.push(
-                { type: "order", label: "Order", color: "green", icon: "📦" },
-                { type: "cancel", label: "Cancel", color: "red", icon: "❌" }
-            );
         }
 
         // Procurement Actions for Ordered status
@@ -1144,31 +1129,27 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                         actions.push(
                             { type: "deliver", label: "Deliver (Delegated)", color: "purple", icon: "🚚" }
                         );
-                    } else if (request.status === "Pending Approval") {
+                    } else if (request.status === "Pending Approval" && delegationStep.name === "Procurement order") {
                         // For Pending Approval status, show order actions for procurement delegation
                         actions.push(
                             { type: "order", label: "Order (Delegated)", color: "green", icon: "📦" },
                             { type: "cancel", label: "Cancel (Delegated)", color: "red", icon: "❌" }
                         );
                     }
-                } else if (delegationStep.step_type === 'approval' && delegationStep.step_category === 'finance') {
+                } else if (delegationStep.step_type === 'approval' && (delegationStep.step_category === 'finance' || delegationStep.name === 'Finance Approval')) {
                     // Finance Approval step - can approve, reject, delay, and print bill
                     // Only show actions if the Finance Approval step is not completed yet
                     if (!isWorkflowStepCompleted('Finance Approval')) {
-                        actions.push(
-                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
-                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" },
-                            { type: "delay", label: "Delay Request (Delegated)", color: "yellow", icon: "⏰" }
-                        );
+                        addActionIfNotExists(actions, { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" });
+                        addActionIfNotExists(actions, { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" });
+                        addActionIfNotExists(actions, { type: "delay", label: "Delay Request (Delegated)", color: "yellow", icon: "⏰" });
                     }
                 } else if (delegationStep.step_type === 'approval') {
                     // Other approval steps - only approve and reject
                     // Only show actions if the delegated step is not completed yet
                     if (!isWorkflowStepCompleted(delegationStep.name)) {
-                        actions.push(
-                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
-                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" }
-                        );
+                        addActionIfNotExists(actions, { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" });
+                        addActionIfNotExists(actions, { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" });
                     }
                 }
             } else {
@@ -1198,17 +1179,13 @@ export default function RequestView({ auth, requestId, source = "requests", appr
 
                     if (stepCategory === 'finance') {
                         // Finance Approval step - can approve, reject, delay, and print bill
-                        actions.push(
-                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
-                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" },
-                            { type: "delay", label: "Delay Request (Delegated)", color: "yellow", icon: "⏰" }
-                        );
+                        addActionIfNotExists(actions, { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" });
+                        addActionIfNotExists(actions, { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" });
+                        addActionIfNotExists(actions, { type: "delay", label: "Delay Request (Delegated)", color: "yellow", icon: "⏰" });
                     } else {
                         // Other steps - only approve and reject
-                        actions.push(
-                            { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" },
-                            { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" }
-                        );
+                        addActionIfNotExists(actions, { type: "approve", label: "Approve Request (Delegated)", color: "green", icon: "✓" });
+                        addActionIfNotExists(actions, { type: "reject", label: "Reject Request (Delegated)", color: "red", icon: "✗" });
                     }
                 }
             }
@@ -1540,7 +1517,7 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                                 )}
                             </div>
                             <p className="text-gray-600">
-                                Submitted by {request.employee?.full_name}
+                                Submitted by {request.employee?.full_name || `User Deleted (ID: ${request.employee_id})`}
                             </p>
                         </div>
                     </div>
@@ -1664,7 +1641,11 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                                         Name
                                     </dt>
                                     <dd className="mt-1 text-sm text-gray-900">
-                                        {request.employee?.full_name}
+                                        {request.employee?.full_name || (
+                                            <span className="text-red-600 italic">
+                                                User Deleted (ID: {request.employee_id})
+                                            </span>
+                                        )}
                                     </dd>
                                 </div>
                                 <div>
@@ -1672,7 +1653,11 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                                         Email
                                     </dt>
                                     <dd className="mt-1 text-sm text-gray-900">
-                                        {request.employee?.email}
+                                        {request.employee?.email || (
+                                            <span className="text-red-600 italic">
+                                                Not Available
+                                            </span>
+                                        )}
                                     </dd>
                                 </div>
                                 <div>
@@ -1680,7 +1665,11 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                                         Department
                                     </dt>
                                     <dd className="mt-1 text-sm text-gray-900">
-                                        {request.employee?.department?.name}
+                                        {request.employee?.department?.name || (
+                                            <span className="text-red-600 italic">
+                                                Not Available
+                                            </span>
+                                        )}
                                     </dd>
                                 </div>
                             </dl>
@@ -2094,87 +2083,6 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                             </div>
                         )}
 
-        {/* Approval Portal Actions */}
-        {isApprovalPortal && request.status === "Pending Approval" && (
-            <div className="bg-white shadow-sm rounded-lg p-6 mb-6">
-                <div className="border-l-4 border-blue-500 bg-blue-50 p-4 mb-6">
-                    <div className="flex">
-                        <div className="flex-shrink-0">
-                            <svg className="h-5 w-5 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                            </svg>
-                        </div>
-                        <div className="ml-3">
-                            <h3 className="text-sm font-medium text-blue-800">
-                                Approval Required
-                            </h3>
-                            <div className="mt-2 text-sm text-blue-700">
-                                <p>Your approval is required for this request. Please review the details and take action.</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="mb-6">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Notes (Optional)
-                    </label>
-                    <textarea
-                        value={actionNotes}
-                        onChange={(e) => setActionNotes(e.target.value)}
-                        rows={3}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Add any notes or comments about this request..."
-                    />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <button
-                        onClick={() => handleApprovalAction('approve')}
-                        disabled={actionLoading}
-                        className="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
-                        </svg>
-                        {actionLoading ? 'Processing...' : 'Approve Request'}
-                    </button>
-
-                    <button
-                        onClick={() => handleApprovalAction('reject')}
-                        disabled={actionLoading}
-                        className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                        {actionLoading ? 'Processing...' : 'Reject Request'}
-                    </button>
-
-                    <button
-                        onClick={() => handleApprovalAction('forward')}
-                        disabled={actionLoading}
-                        className="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 flex items-center justify-center shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path>
-                        </svg>
-                        {actionLoading ? 'Processing...' : 'Forward Request'}
-                    </button>
-                </div>
-
-                <div className="mt-6 p-4 bg-yellow-50 border border-yellow-200 rounded-md">
-                    <div className="flex">
-                        <svg className="w-5 h-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                        </svg>
-                        <div className="text-sm text-yellow-800">
-                            <strong>Important:</strong> This action cannot be undone. The request will be processed immediately.
-                        </div>
-                    </div>
-                </div>
-            </div>
-        )}
 
         {/* New Simplified Actions */}
         {[
@@ -2183,7 +2091,7 @@ export default function RequestView({ auth, requestId, source = "requests", appr
             "Pending Procurement Verification",
             "Ordered",
             "Cancelled",
-        ].includes(request.status) && !isApprovalPortal && (
+        ].includes(request.status) && (
                             <div className="bg-white shadow-sm rounded-lg p-6">
                                 <h3 className="text-lg font-medium text-gray-900 mb-4">
                                     Actions
@@ -2194,7 +2102,27 @@ export default function RequestView({ auth, requestId, source = "requests", appr
 
                                     if (availableActions.length === 0) {
                                         // Show appropriate message based on status
-                                        if (hasUserAlreadyApprovedOrRejected()) {
+                                        if (isRequestCreatorInTrash()) {
+                                            return (
+                                                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                                                    <div className="flex items-center">
+                                                        <div className="flex-shrink-0">
+                                                            <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                                                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                                            </svg>
+                                                        </div>
+                                                        <div className="ml-3">
+                                                            <p className="text-sm font-medium text-red-800">
+                                                                🚫 Request Disabled
+                                                            </p>
+                                                            <p className="text-sm text-red-700 mt-1">
+                                                                This request cannot be processed because the creator has been deleted from the system
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        } else if (hasUserAlreadyApprovedOrRejected()) {
                                             return (
                                                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                                                     <div className="flex items-center">
@@ -2287,12 +2215,71 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                             </h3>
                             <div className="space-y-2">
                                 <button
-                                    onClick={() => {
-                                        const url = window.location.href;
-                                        navigator.clipboard.writeText(url);
-                                        // URL copied to clipboard - no need to show message
+                                    onClick={async () => {
+                                        try {
+                                            const url = window.location.href;
+
+                                            // Try modern clipboard API first
+                                            if (navigator.clipboard && window.isSecureContext) {
+                                                await navigator.clipboard.writeText(url);
+                                                // Show success message
+                                                const button = event.target;
+                                                const originalText = button.textContent;
+                                                button.textContent = '✅ Copied!';
+                                                button.className = 'w-full text-left text-sm text-green-600 hover:text-green-800 hover:bg-green-50 px-2 py-1 rounded';
+                                                setTimeout(() => {
+                                                    button.textContent = originalText;
+                                                    button.className = 'w-full text-left text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded';
+                                                }, 2000);
+                                            } else {
+                                                // Fallback for older browsers or non-HTTPS
+                                                const textArea = document.createElement('textarea');
+                                                textArea.value = url;
+                                                textArea.style.position = 'fixed';
+                                                textArea.style.left = '-999999px';
+                                                textArea.style.top = '-999999px';
+                                                document.body.appendChild(textArea);
+                                                textArea.focus();
+                                                textArea.select();
+
+                                                try {
+                                                    document.execCommand('copy');
+                                                    // Show success message
+                                                    const button = event.target;
+                                                    const originalText = button.textContent;
+                                                    button.textContent = '✅ Copied!';
+                                                    button.className = 'w-full text-left text-sm text-green-600 hover:text-green-800 hover:bg-green-50 px-2 py-1 rounded';
+                                                    setTimeout(() => {
+                                                        button.textContent = originalText;
+                                                        button.className = 'w-full text-left text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded';
+                                                    }, 2000);
+                                                } catch (err) {
+                                                    // If all else fails, show the URL for manual copying
+                                                    const url = window.location.href;
+                                                    navigator.clipboard.writeText(url).then(() => {
+                                                        const button = event.target;
+                                                        const originalText = button.textContent;
+                                                        button.textContent = '✅ Copied!';
+                                                        button.className = 'w-full text-left text-sm text-green-600 hover:text-green-800 hover:bg-green-50 px-2 py-1 rounded';
+                                                        setTimeout(() => {
+                                                            button.textContent = originalText;
+                                                            button.className = 'w-full text-left text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded';
+                                                        }, 2000);
+                                                    }).catch(() => {
+                                                        prompt('Copy this link manually:', url);
+                                                    });
+                                                }
+
+                                                document.body.removeChild(textArea);
+                                            }
+                                        } catch (err) {
+                                            console.error('Failed to copy link:', err);
+                                            // Show the URL for manual copying
+                                            const url = window.location.href;
+                                            prompt('Copy this link manually:', url);
+                                        }
                                     }}
-                                    className="w-full text-left text-sm text-blue-600 hover:text-blue-800"
+                                    className="w-full text-left text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded"
                                 >
                                     📋 Copy Link
                                 </button>
@@ -2458,7 +2445,8 @@ export default function RequestView({ auth, requestId, source = "requests", appr
                                         </div>
                                     ) : actionType === "approve" &&
                                       (auth.user?.id === 28 || request.delegation_info) &&
-                                      request.approval_workflow?.steps?.find(step => step.status === 'pending')?.step_category === 'finance' ? (
+                                      (request.approval_workflow?.steps?.find(step => step.status === 'pending')?.step_category === 'finance' ||
+                                       request.approval_workflow?.steps?.find(step => step.status === 'pending')?.name === 'Finance Approval') ? (
                                         <div className="space-y-4">
                                             <p className="text-sm text-gray-500 text-center">
                                                 Finance Approval with Bill

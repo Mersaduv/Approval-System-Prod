@@ -38,7 +38,7 @@ class Request extends Model
 
     public function employee()
     {
-        return $this->belongsTo(User::class, 'employee_id');
+        return $this->belongsTo(User::class, 'employee_id')->withTrashed();
     }
 
     public function notifications()
@@ -58,11 +58,11 @@ class Request extends Model
 
     public function verifiedBy()
     {
-        return $this->belongsTo(User::class, 'verified_by');
+        return $this->belongsTo(User::class, 'verified_by')->withTrashed();
     }
 
     public function billPrintedBy()
     {
-        return $this->belongsTo(User::class, 'bill_printed_by');
+        return $this->belongsTo(User::class, 'bill_printed_by')->withTrashed();
     }
 }

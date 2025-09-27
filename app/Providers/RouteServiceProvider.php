@@ -20,6 +20,25 @@ class RouteServiceProvider extends ServiceProvider
     public const HOME = '/';
 
     /**
+     * Get the redirect URL after authentication.
+     */
+    public static function redirectAfterLogin(Request $request): string
+    {
+        // Check if user was trying to access approval portal
+        if ($request->has('redirect_to')) {
+            return $request->get('redirect_to');
+        }
+
+        // Check if the intended URL is approval portal
+        $intended = $request->session()->get('url.intended');
+        if ($intended && str_contains($intended, '/approval-portal/')) {
+            return $intended;
+        }
+
+        return static::HOME;
+    }
+
+    /**
      * Define your route model bindings, pattern filters, and other route configuration.
      */
     public function boot(): void

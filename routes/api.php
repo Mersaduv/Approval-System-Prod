@@ -4,7 +4,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use App\Http\Controllers\Api\RequestController;
-use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\DepartmentController;
 use App\Http\Controllers\Api\Admin\ApprovalRuleController;
 use App\Http\Controllers\Api\Admin\DepartmentController as AdminDepartmentController;
@@ -13,7 +12,7 @@ use App\Http\Controllers\Api\Admin\UserController;
 use App\Http\Controllers\Api\Admin\SystemSettingsController;
 use App\Http\Controllers\Api\WorkflowStepController;
 use App\Http\Controllers\Api\DelegationController;
-use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\Api\ProfileController;
 
 /*
 |--------------------------------------------------------------------------
@@ -45,6 +44,10 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/requests/{id}', [RequestController::class, 'show']);
     Route::get('/requests/{id}/audit-logs', [RequestController::class, 'auditLogs']);
 
+    // Dashboard stats
+    Route::get('/dashboard/stats', [RequestController::class, 'dashboardStats']);
+
+
     // Request actions
     Route::post('/requests/{id}/approve', [RequestController::class, 'approve']);
     Route::post('/requests/{id}/reject', [RequestController::class, 'reject']);
@@ -64,12 +67,6 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/requests/pending/verification', [RequestController::class, 'pendingProcurementVerification']);
     Route::post('/requests/{id}/verify', [RequestController::class, 'processProcurementVerification']);
 
-    // Notification routes
-    Route::get('/notifications', [NotificationController::class, 'index']);
-    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
-    Route::post('/notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-    Route::post('/notifications/read-all', [NotificationController::class, 'markAllAsRead']);
-    Route::delete('/notifications/{id}', [NotificationController::class, 'destroy']);
 
     // Delegation routes
     Route::get('/delegations', [DelegationController::class, 'index']);
@@ -82,6 +79,9 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/delegations/available-users', [DelegationController::class, 'getAvailableUsers']);
     Route::get('/delegations/workflow-steps', [DelegationController::class, 'getWorkflowSteps']);
     Route::get('/delegations/stats', [DelegationController::class, 'getStats']);
+
+    // Profile routes
+    Route::post('/validate-current-password', [ProfileController::class, 'validateCurrentPassword']);
 
     // Debug routes
     Route::get('/test-session', function () {
@@ -120,13 +120,20 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     // User management
     Route::get('/users', [UserController::class, 'index']);
     Route::post('/users', [UserController::class, 'store']);
+    Route::get('/users/roles/available', [UserController::class, 'getRoles']);
+    Route::get('/users/permissions/available', [UserController::class, 'getPermissions']);
+    Route::get('/users/stats/overview', [UserController::class, 'getStats']);
+
+    // User trash management (must be before /users/{id} routes)
+    Route::get('/users/trash', [UserController::class, 'trash']);
+    Route::post('/users/{id}/restore', [UserController::class, 'restore']);
+    Route::delete('/users/{id}/force', [UserController::class, 'forceDelete']);
+
+    // User individual routes (must be after specific routes)
     Route::get('/users/{id}', [UserController::class, 'show']);
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
-    Route::get('/users/roles/available', [UserController::class, 'getRoles']);
-    Route::get('/users/permissions/available', [UserController::class, 'getPermissions']);
     Route::put('/users/{id}/permissions', [UserController::class, 'updatePermissions']);
-    Route::get('/users/stats/overview', [UserController::class, 'getStats']);
 
 
     // Approval rules management
@@ -160,16 +167,3 @@ Route::middleware(['web', 'auth'])->prefix('admin')->group(function () {
     Route::post('/workflow-steps/{id}/duplicate', [WorkflowStepController::class, 'duplicate']);
 });
 
-// Reporting routes
-Route::middleware(['web', 'auth'])->prefix('reports')->group(function () {
-    Route::get('/dashboard-stats', [ReportsController::class, 'dashboardStats']);
-    Route::get('/requests-by-department', [ReportsController::class, 'requestsByDepartment']);
-    Route::get('/requests-by-user', [ReportsController::class, 'requestsByUser']);
-    Route::get('/approval-workflow-stats', [ReportsController::class, 'approvalWorkflowStats']);
-    Route::get('/request-audit-trail/{requestId}', [ReportsController::class, 'requestAuditTrail']);
-    Route::get('/system-activity-log', [ReportsController::class, 'systemActivityLog']);
-    Route::get('/monthly-trends', [ReportsController::class, 'monthlyTrends']);
-    Route::get('/performance-metrics', [ReportsController::class, 'performanceMetrics']);
-    Route::get('/export/requests', [ReportsController::class, 'exportRequests']);
-    Route::get('/export/audit-log', [ReportsController::class, 'exportAuditLog']);
-});

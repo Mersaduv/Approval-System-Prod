@@ -793,10 +793,10 @@ class RequestController extends Controller
 
         foreach ($activeDelegations as $delegation) {
             // Check if delegation is for Finance Approval step
-            if ($delegation->workflowStep && $delegation->workflowStep->step_category === 'finance') {
+            if ($delegation->workflowStep && ($delegation->workflowStep->step_category === 'finance' || $delegation->workflowStep->name === 'Finance Approval')) {
                 // Apply department filter based on delegation settings
                 if ($delegation->department_id) {
-                    if ($request->employee->department_id !== $delegation->department_id) {
+                    if ($request->employee && $request->employee->department_id !== $delegation->department_id) {
                         continue;
                     }
                 }
@@ -1218,7 +1218,7 @@ class RequestController extends Controller
             if ($delegation->workflowStep && $delegation->workflowStep->step_type === 'verification') {
                 // Apply department filter based on delegation settings
                 if ($delegation->department_id) {
-                    if ($request->employee->department_id !== $delegation->department_id) {
+                    if ($request->employee && $request->employee->department_id !== $delegation->department_id) {
                         continue;
                     }
                 }
@@ -1429,6 +1429,20 @@ class RequestController extends Controller
     private function getApprovalWorkflowInfo(RequestModel $request): array
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $department = $employee->department;
         $amount = $request->amount;
 
@@ -1455,6 +1469,21 @@ class RequestController extends Controller
      */
     private function getDynamicWorkflowStepsInfo(RequestModel $request, $workflowSteps): array
     {
+        $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $steps = [];
         $currentStep = 0;
         $totalSteps = $workflowSteps->count();
@@ -1462,7 +1491,7 @@ class RequestController extends Controller
         $nextApprover = null;
 
         // Check if the request creator is admin
-        $isAdminRequest = $request->employee && $request->employee->role && $request->employee->role->name === 'admin';
+        $isAdminRequest = $employee && $employee->role && $employee->role->name === 'admin';
 
         foreach ($workflowSteps as $index => $step) {
             // Skip manager assignment steps for admin requests
@@ -1483,6 +1512,15 @@ class RequestController extends Controller
                 'step_category' => $step->step_category,
                 'is_active' => $step->is_active,
                 'timeout_hours' => $step->timeout_hours,
+                'assigned_users' => $step->getAssignedUsers($request)->map(function($user) {
+                    return [
+                        'id' => $user->id,
+                        'name' => $user->full_name,
+                        'email' => $user->email,
+                        'role' => $user->role ? $user->role->name : null,
+                        'department' => $user->department ? $user->department->name : null
+                    ];
+                }),
                 'assignments' => $step->assignments->map(function($assignment) {
                     return [
                         'id' => $assignment->id,
@@ -1771,7 +1809,7 @@ class RequestController extends Controller
     {
         switch ($assignment->assignable_type) {
             case 'App\\Models\\User':
-                $user = \App\Models\User::find($assignment->assignable_id);
+                $user = \App\Models\User::withoutTrashed()->find($assignment->assignable_id);
                 return $user ? $user->full_name : 'Unknown User';
             case 'App\\Models\\Role':
                 $role = \App\Models\Role::find($assignment->assignable_id);
@@ -1827,6 +1865,20 @@ class RequestController extends Controller
     private function getLegacyWorkflowInfo(RequestModel $request): array
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $department = $employee->department;
         $amount = $request->amount;
 
@@ -1866,8 +1918,10 @@ class RequestController extends Controller
      */
     private function addProcurementVerificationStep(RequestModel $request, array $workflowInfo): array
     {
+        $employee = $request->employee;
+
         // Only add procurement verification step for non-procurement users
-        if ($request->employee->isProcurement()) {
+        if ($employee && $employee->isProcurement()) {
             return $workflowInfo;
         }
 
@@ -1943,6 +1997,20 @@ class RequestController extends Controller
     private function getDefaultWorkflowInfo(RequestModel $request): array
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $amount = $request->amount;
 
         // Get thresholds from settings
@@ -2045,6 +2113,20 @@ class RequestController extends Controller
     private function getDynamicWorkflowInfo(RequestModel $request, $rules): array
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $workflowInfo = [
             'is_sequential' => $rules->count() > 1,
             'current_step' => 1,
@@ -2101,6 +2183,20 @@ class RequestController extends Controller
     private function getProcurementWorkflowInfo(RequestModel $request): array
     {
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $amount = $request->amount;
 
         // Get thresholds from settings
@@ -2209,6 +2305,20 @@ class RequestController extends Controller
 
         // Fallback to legacy system
         $employee = $request->employee;
+
+        // Handle case where employee (user) has been deleted
+        if (!$employee) {
+            return [
+                'error' => 'Employee not found',
+                'message' => 'The user who created this request has been deleted from the system.',
+                'steps' => [],
+                'current_step' => null,
+                'is_complete' => false,
+                'can_approve' => false,
+                'next_approver' => null
+            ];
+        }
+
         $department = $employee->department;
         $amount = $request->amount;
 
@@ -2297,7 +2407,7 @@ class RequestController extends Controller
     {
         for ($i = 0; $i < $currentIndex; $i++) {
             $rule = $rules[$i];
-            if (!$this->hasApprovalFromRole($request, $rule->approver_role, $request->employee->department_id)) {
+            if (!$this->hasApprovalFromRole($request, $rule->approver_role, $request->employee ? $request->employee->department_id : null)) {
                 return false;
             }
         }
@@ -2309,7 +2419,8 @@ class RequestController extends Controller
      */
     private function getDepartmentManager(int $departmentId): ?\App\Models\User
     {
-        return \App\Models\User::where('department_id', $departmentId)
+        return \App\Models\User::withoutTrashed()
+            ->where('department_id', $departmentId)
             ->whereHas('role', function($query) {
                 $query->where('name', 'manager');
             })
@@ -2318,23 +2429,26 @@ class RequestController extends Controller
 
     private function getAdmin(): ?\App\Models\User
     {
-        return \App\Models\User::whereHas('role', function($query) {
-            $query->where('name', 'admin');
-        })->first();
+        return \App\Models\User::withoutTrashed()
+            ->whereHas('role', function($query) {
+                $query->where('name', 'admin');
+            })->first();
     }
 
     private function getApproverByRole(string $role, int $departmentId): ?\App\Models\User
     {
         if ($role === 'Manager' || $role === 'manager') {
-            return \App\Models\User::whereHas('role', function($query) {
-                $query->where('name', 'manager');
-            })
-            ->where('department_id', $departmentId)
-            ->first();
+            return \App\Models\User::withoutTrashed()
+                ->whereHas('role', function($query) {
+                    $query->where('name', 'manager');
+                })
+                ->where('department_id', $departmentId)
+                ->first();
         } elseif ($role === 'Admin' || $role === 'admin') {
-            return \App\Models\User::whereHas('role', function($query) {
-                $query->where('name', 'admin');
-            })->first();
+            return \App\Models\User::withoutTrashed()
+                ->whereHas('role', function($query) {
+                    $query->where('name', 'admin');
+                })->first();
         }
         return null;
     }
@@ -2347,7 +2461,7 @@ class RequestController extends Controller
                 $query->whereHas('role', function($roleQuery) {
                     $roleQuery->where('name', 'manager');
                 })
-                ->where('department_id', $request->employee->department_id);
+                ->where('department_id', $request->employee ? $request->employee->department_id : null);
             })
             ->exists();
     }
@@ -2429,7 +2543,7 @@ class RequestController extends Controller
                     return false;
                 } else {
                     // Regular managers can view requests from their department OR requests assigned to them in workflow steps
-                    if ($request->employee->department_id === $user->department_id) {
+                    if ($request->employee && $request->employee->department_id === $user->department_id) {
                         return true;
                     }
                     // Check if request is assigned to them personally in workflow steps
@@ -2579,7 +2693,7 @@ class RequestController extends Controller
             // Apply department filter based on delegation settings
             if ($delegation->department_id) {
                 // If delegation is specific to a department, only allow requests from that department
-                if ($request->employee->department_id !== $delegation->department_id) {
+                if ($request->employee && $request->employee->department_id !== $delegation->department_id) {
                     continue;
                 }
             }
@@ -2863,7 +2977,7 @@ class RequestController extends Controller
 
             // Check if assignment is for a specific manager user
             if ($assignment->assignable_type === 'App\\Models\\User') {
-                $user = \App\Models\User::find($assignment->assignable_id);
+                $user = \App\Models\User::withoutTrashed()->find($assignment->assignable_id);
                 return $user && $user->role && $user->role->name === 'manager';
             }
 
@@ -2881,7 +2995,7 @@ class RequestController extends Controller
             ->where('is_active', true)
             ->where(function ($query) use ($request) {
                 $query->whereNull('department_id')
-                    ->orWhere('department_id', $request->employee->department_id);
+                    ->orWhere('department_id', $request->employee ? $request->employee->department_id : null);
             })
             ->where(function ($query) {
                 $query->whereNull('starts_at')
@@ -3038,5 +3152,125 @@ class RequestController extends Controller
             ->exists();
 
         return $participation;
+    }
+
+    /**
+     * Get dashboard statistics for the authenticated user
+     */
+    public function dashboardStats(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+
+        // Get user's requests
+        $userRequests = RequestModel::where('employee_id', $user->id);
+
+        // Get all requests (for managers, admins, and procurement users)
+        $allRequests = RequestModel::query();
+
+        // Apply role-based filtering for all requests
+        switch ($user->role->name) {
+            case 'employee':
+                $allRequests = $userRequests;
+                break;
+            case 'manager':
+                $allRequests->where(function($q) use ($user) {
+                    $q->whereHas('employee', function($empQuery) use ($user) {
+                        $empQuery->where('department_id', $user->department_id);
+                    })
+                    ->orWhere(function($workflowQuery) use ($user) {
+                        $workflowQuery->whereExists(function($subQuery) use ($user) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('workflow_steps')
+                                ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
+                                ->where('workflow_step_assignments.assignable_id', $user->department_id)
+                                ->where('workflow_steps.is_active', true);
+                        });
+                    });
+                });
+                break;
+            case 'admin':
+                // Admin can see all requests
+                break;
+            case 'procurement':
+                // Procurement can see all requests
+                break;
+        }
+
+        // Calculate statistics
+        $stats = [
+            'totalRequests' => $allRequests->count(),
+            'pendingRequests' => $allRequests->clone()->where('status', 'Pending')->count(),
+            'approvedRequests' => $allRequests->clone()->where('status', 'Approved')->count(),
+            'rejectedRequests' => $allRequests->clone()->where('status', 'Rejected')->count(),
+            'deliveredRequests' => $allRequests->clone()->where('status', 'Delivered')->count(),
+            'myRequests' => $userRequests->count(),
+            'pendingApprovals' => $this->getPendingApprovalsCount($user),
+        ];
+
+        // Get recent requests
+        $recentRequests = $allRequests->clone()
+            ->with(['employee', 'procurement', 'auditLogs'])
+            ->orderBy('created_at', 'desc')
+            ->limit(5)
+            ->get()
+            ->map(function($request) {
+                return [
+                    'id' => $request->id,
+                    'item' => $request->item,
+                    'amount' => $request->amount,
+                    'status' => $request->status,
+                    'created_at' => $request->created_at->format('Y-m-d'),
+                    'employee_name' => $request->employee ? $request->employee->full_name : "User Deleted (ID: {$request->employee_id})",
+                    'audit_logs' => $request->auditLogs,
+                    'procurement' => $request->procurement,
+                ];
+            });
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'stats' => $stats,
+                'recentRequests' => $recentRequests
+            ]
+        ]);
+    }
+
+    /**
+     * Get count of pending approvals for the user
+     */
+    private function getPendingApprovalsCount(User $user): int
+    {
+        $query = RequestModel::query();
+
+        switch ($user->role->name) {
+            case 'employee':
+                return 0; // Employees don't have pending approvals
+            case 'manager':
+                $query->where(function($q) use ($user) {
+                    $q->whereHas('employee', function($empQuery) use ($user) {
+                        $empQuery->where('department_id', $user->department_id);
+                    })
+                    ->orWhere(function($workflowQuery) use ($user) {
+                        $workflowQuery->whereExists(function($subQuery) use ($user) {
+                            $subQuery->select(DB::raw(1))
+                                ->from('workflow_steps')
+                                ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
+                                ->where('workflow_step_assignments.assignable_id', $user->department_id)
+                                ->where('workflow_steps.is_active', true);
+                        });
+                    });
+                });
+                break;
+            case 'admin':
+                // Admin can see all requests
+                break;
+            case 'procurement':
+                // Procurement can see all requests
+                break;
+        }
+
+        return $query->whereIn('status', ['Pending', 'Pending Approval', 'Pending Procurement Verification'])->count();
     }
 }

@@ -19,16 +19,18 @@ class EmployeeNotificationMail extends Mailable implements ShouldQueue
     public $employee;
     public $status;
     public $reason;
+    public $workflowInfo;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(RequestModel $request, User $employee, string $status, string $reason = null)
+    public function __construct(RequestModel $request, User $employee, string $status, string $reason = null, array $workflowInfo = null)
     {
         $this->request = $request;
         $this->employee = $employee;
         $this->status = $status;
         $this->reason = $reason;
+        $this->workflowInfo = $workflowInfo;
     }
 
     /**
@@ -40,6 +42,7 @@ class EmployeeNotificationMail extends Mailable implements ShouldQueue
             'approved' => 'Request Approved - Request #' . $this->request->id,
             'rejected' => 'Request Rejected - Request #' . $this->request->id,
             'delivered' => 'Request Delivered - Request #' . $this->request->id,
+            'workflow_update' => 'Workflow Update - Request #' . $this->request->id,
             default => 'Request Update - Request #' . $this->request->id
         };
 
@@ -62,6 +65,7 @@ class EmployeeNotificationMail extends Mailable implements ShouldQueue
                 'reason' => $this->reason,
                 'statusMessage' => $this->getStatusMessage(),
                 'actionRequired' => $this->getActionRequired(),
+                'workflowInfo' => $this->workflowInfo,
             ]
         );
     }
@@ -83,6 +87,7 @@ class EmployeeNotificationMail extends Mailable implements ShouldQueue
             'approved' => 'Your request has been approved and forwarded to the procurement team.',
             'rejected' => 'Your request has been rejected.',
             'delivered' => 'Your request has been delivered successfully.',
+            'workflow_update' => $this->reason ?: 'Your request workflow has been updated.',
             default => 'Your request has been updated.'
         };
     }
@@ -96,6 +101,7 @@ class EmployeeNotificationMail extends Mailable implements ShouldQueue
             'approved' => 'The procurement team will process your request and notify you when it\'s ready.',
             'rejected' => 'You may submit a new request with the necessary corrections.',
             'delivered' => 'Please confirm receipt of your requested item.',
+            'workflow_update' => 'Please check the system for more details about the workflow progress.',
             default => 'Please check the system for more details.'
         };
     }

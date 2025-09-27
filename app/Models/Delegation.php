@@ -38,7 +38,7 @@ class Delegation extends Model
      */
     public function delegator(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'delegator_id');
+        return $this->belongsTo(User::class, 'delegator_id')->withTrashed();
     }
 
     /**
@@ -46,7 +46,7 @@ class Delegation extends Model
      */
     public function delegate(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'delegate_id');
+        return $this->belongsTo(User::class, 'delegate_id')->withTrashed();
     }
 
     /**

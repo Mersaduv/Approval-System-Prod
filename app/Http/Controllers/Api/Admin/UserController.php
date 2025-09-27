@@ -198,11 +198,22 @@ class UserController extends Controller
                 ], 422);
             }
 
+            // Soft delete the user
             $user->delete();
+
+            // Log the action
+            \App\Models\AuditLog::create([
+                'user_id' => Auth::id(),
+                'request_id' => null,
+                'action' => 'User Moved to Trash',
+                'notes' => "User '{$user->full_name}' moved to trash",
+                'ip_address' => request()->ip(),
+                'user_agent' => request()->userAgent()
+            ]);
 
             return response()->json([
                 'success' => true,
-                'message' => 'User deleted successfully'
+                'message' => 'User moved to trash successfully'
             ]);
 
         } catch (\Exception $e) {
@@ -228,6 +239,103 @@ class UserController extends Controller
             'success' => true,
             'data' => $roles
         ]);
+    }
+
+    /**
+     * Get trashed users
+     */
+    public function trash(): JsonResponse
+    {
+        try {
+            $users = User::onlyTrashed()
+                ->with(['role', 'department'])
+                ->orderBy('deleted_at', 'desc')
+                ->get();
+
+            return response()->json([
+                'success' => true,
+                'data' => $users
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to fetch trashed users',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Restore a trashed user
+     */
+    public function restore(string $id): JsonResponse
+    {
+        try {
+            $user = User::onlyTrashed()->findOrFail($id);
+
+            $user->restore();
+
+            // Log the action (only if user is authenticated)
+            if (Auth::check()) {
+                \App\Models\AuditLog::create([
+                    'user_id' => Auth::id(),
+                    'request_id' => null,
+                    'action' => 'User Restored from Trash',
+                    'notes' => "User '{$user->full_name}' restored from trash",
+                    'ip_address' => request()->ip(),
+                    'user_agent' => request()->userAgent()
+                ]);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User restored successfully'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to restore user',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Permanently delete a user
+     */
+    public function forceDelete(string $id): JsonResponse
+    {
+        try {
+            $user = User::onlyTrashed()->findOrFail($id);
+
+            // Log the action before permanent deletion (only if user is authenticated)
+            if (Auth::check()) {
+                \App\Models\AuditLog::create([
+                    'user_id' => Auth::id(),
+                    'request_id' => null,
+                    'action' => 'User Permanently Deleted',
+                    'notes' => "User '{$user->full_name}' permanently deleted from trash",
+                    'ip_address' => request()->ip(),
+                    'user_agent' => request()->userAgent()
+                ]);
+            }
+
+            $user->forceDelete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'User permanently deleted'
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to permanently delete user',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

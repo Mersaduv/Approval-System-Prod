@@ -1,7 +1,7 @@
 import { Head, Link, useForm } from '@inertiajs/react'
 import { useState, useEffect } from 'react'
 
-export default function AppLayout({ children, title, auth }) {
+export default function AppLayout({ children, title, auth = {} }) {
     const [showUserMenu, setShowUserMenu] = useState(false)
     const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -24,27 +24,18 @@ export default function AppLayout({ children, title, auth }) {
 
     const getNavigation = () => {
         const baseNavigation = [
-            { name: 'Dashboard', href: '/', icon: '🏠', current: title === 'Home' },
+            { name: 'Dashboard', href: '/', icon: '📊', current: title === 'Home' },
             { name: 'Requests', href: '/requests', icon: '📄', current: title === 'Requests' },
             { name: 'Delegations', href: '/delegations', icon: '🔄', current: title === 'Delegation Management' },
         ]
 
-        // Debug logging
-        console.log('Auth user:', auth.user)
-        console.log('User role:', auth.user?.role?.name)
-
         // Add role-specific navigation
         if (auth.user?.role?.name === 'admin') {
-            console.log('Adding admin navigation items')
             baseNavigation.push(
-                { name: 'Users', href: '/users', icon: '👥', current: title === 'Users' },
+                { name: 'Users', href: '/admin/users', icon: '👥', current: title === 'Users' },
                 { name: 'Settings', href: '/settings', icon: '⚙️', current: title === 'Settings' }
             )
         }
-
-        // Procurement users now use the Requests page instead of separate Procurement page
-
-        console.log('Final navigation:', baseNavigation)
         return baseNavigation
     }
 
@@ -156,7 +147,7 @@ export default function AppLayout({ children, title, auth }) {
                                                 {auth?.user?.email || ''}
                                             </p>
                                             <p className="text-xs text-gray-400">
-                                                {auth?.user?.role || ''}
+                                                {auth?.user?.role?.name || ''}
                                             </p>
                                         </div>
                                         <Link
@@ -165,12 +156,14 @@ export default function AppLayout({ children, title, auth }) {
                                         >
                                             Profile
                                         </Link>
-                                        <Link
-                                            href="/settings"
-                                            className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                                        >
-                                            Settings
-                                        </Link>
+                                        {auth.user?.role?.name === 'admin' && (
+                                            <Link
+                                                href="/settings"
+                                                className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                            >
+                                                Settings
+                                            </Link>
+                                        )}
                                         <div className="border-t border-gray-200">
                                             <button
                                                 onClick={handleLogout}

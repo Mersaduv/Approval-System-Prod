@@ -45,7 +45,7 @@ class WorkflowStepAssignment extends Model
     {
         switch ($this->assignable_type) {
             case 'App\\Models\\User':
-                return $this->belongsTo(User::class, 'assignable_id');
+                return $this->belongsTo(User::class, 'assignable_id')->withTrashed();
             case 'App\\Models\\FinanceAssignment':
                 return $this->belongsTo(FinanceAssignment::class, 'assignable_id');
             case 'App\\Models\\Role':

@@ -282,7 +282,6 @@ const DelegationManagement = ({ auth }) => {
             {/* Header */}
             <div className="flex justify-between items-center">
                 <div>
-                    <h2 className="text-2xl font-bold text-gray-900">Delegation Management</h2>
                     <p className="text-gray-600">Manage your approval delegations</p>
                 </div>
                 <button

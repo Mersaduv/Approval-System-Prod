@@ -57,7 +57,6 @@ app/
 ├── Http/Controllers/
 │   ├── Api/                    # API controllers
 │   ├── ApprovalPortalController.php
-│   └── ReportsController.php
 ├── Mail/                       # Email templates
 ├── Models/                     # Eloquent models
 ├── Services/                   # Business logic services
@@ -199,14 +198,6 @@ MAIL_ENCRYPTION=tls
 5. Add notes if needed
 6. Submit decision
 
-### Viewing Reports
-1. Navigate to "Reports" section
-2. Select date range and filters
-3. View comprehensive analytics:
-   - Request statistics by department
-   - User activity reports
-   - Approval workflow metrics
-   - Monthly trends
    - System activity logs
 
 ## 🔒 Security Features

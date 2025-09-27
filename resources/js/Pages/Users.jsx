@@ -219,9 +219,22 @@ export default function Users({ auth }) {
         <AppLayout title="Users" auth={auth}>
             <div className="space-y-6">
                 {/* Header */}
-                <div>
-                    <h1 className="text-xl lg:text-2xl font-bold text-gray-900">User Management</h1>
-                    <p className="text-sm lg:text-base text-gray-600 mt-1">Manage system users and their permissions.</p>
+                <div className="flex justify-between items-start">
+                    <div>
+                        <h1 className="text-xl lg:text-2xl font-bold text-gray-900">User Management</h1>
+                        <p className="text-sm lg:text-base text-gray-600 mt-1">Manage system users and their permissions.</p>
+                    </div>
+                    <div className="flex space-x-3">
+                        <Link
+                            href="/admin/users/trash"
+                            className="inline-flex items-center px-4 py-2 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-white hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                        >
+                            <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            View Trash
+                        </Link>
+                    </div>
                 </div>
 
                 {/* Filters and Add User */}
@@ -582,7 +595,7 @@ export default function Users({ auth }) {
                                 Delete User
                             </h3>
                             <p className="text-sm text-gray-500 text-center mb-6">
-                                Are you sure you want to delete <strong>{userToDelete?.full_name}</strong>? This action cannot be undone.
+                                Are you sure you want to delete <strong>{userToDelete?.full_name}</strong>?
                             </p>
                             <div className="flex justify-end space-x-3">
                                 <button
