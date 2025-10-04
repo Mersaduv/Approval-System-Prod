@@ -50,41 +50,39 @@ class RequestController extends Controller
                         $q->whereHas('employee', function($empQuery) use ($user) {
                             $empQuery->where('department_id', $user->department_id);
                         })
-                        // OR show requests assigned to their department in workflow steps (any status)
-                        ->orWhere(function($workflowQuery) use ($user) {
-                            $workflowQuery->whereExists(function($subQuery) use ($user) {
-                                $subQuery->select(DB::raw(1))
-                                    ->from('workflow_steps')
-                                    ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                    ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
-                                    ->where('workflow_step_assignments.assignable_id', $user->department_id)
-                                    ->where('workflow_steps.is_active', true);
-                            });
-                        })
-                        // OR show requests assigned to them personally in workflow steps (any status)
+                        // OR show requests assigned to them personally in workflow steps (from any department)
                         ->orWhere(function($personalQuery) use ($user) {
-                            $personalQuery->whereExists(function($subQuery) use ($user) {
-                                $subQuery->select(DB::raw(1))
-                                    ->from('workflow_steps')
-                                    ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                    ->where('workflow_steps.is_active', true)
-                                    ->where(function($assignmentQuery) use ($user) {
-                                        $assignmentQuery->where(function($userQuery) use ($user) {
-                                            $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
-                                                ->where('workflow_step_assignments.assignable_id', $user->id);
+                            $personalQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'])
+                                ->whereExists(function($subQuery) use ($user) {
+                                    $subQuery->select(DB::raw(1))
+                                        ->from('workflow_steps')
+                                        ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                        ->where('workflow_steps.is_active', true)
+                                        ->where(function($assignmentQuery) use ($user) {
+                                            $assignmentQuery->where(function($userQuery) use ($user) {
+                                                $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                    ->where('workflow_step_assignments.assignable_id', $user->id);
+                                            })
+                                            ->orWhere(function($financeQuery) use ($user) {
+                                                $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
+                                                    ->whereExists(function($financeSubQuery) use ($user) {
+                                                        $financeSubQuery->select(DB::raw(1))
+                                                            ->from('finance_assignments')
+                                                            ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                                                            ->where('finance_assignments.user_id', $user->id)
+                                                            ->where('finance_assignments.is_active', true);
+                                                    });
+                                            });
                                         })
-                                        ->orWhere(function($financeQuery) use ($user) {
-                                            $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
-                                                ->whereExists(function($financeSubQuery) use ($user) {
-                                                    $financeSubQuery->select(DB::raw(1))
-                                                        ->from('finance_assignments')
-                                                        ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
-                                                        ->where('finance_assignments.user_id', $user->id)
-                                                        ->where('finance_assignments.is_active', true);
-                                                });
+                                        // Only show requests that are currently at this workflow step
+                                        ->whereNotExists(function($completedQuery) {
+                                            $completedQuery->select(DB::raw(1))
+                                                ->from('audit_logs')
+                                                ->whereColumn('audit_logs.request_id', 'requests.id')
+                                                ->where('audit_logs.action', 'Step completed')
+                                                ->whereRaw('audit_logs.notes LIKE CONCAT("%", workflow_steps.name, "%")');
                                         });
-                                    });
-                            });
+                                });
                         });
                     });
                 } else {
@@ -132,6 +130,14 @@ class RequestController extends Controller
                                                             ->where('finance_assignments.is_active', true);
                                                     });
                                             });
+                                        })
+                                        // Only show requests that are currently at this workflow step
+                                        ->whereNotExists(function($completedQuery) {
+                                            $completedQuery->select(DB::raw(1))
+                                                ->from('audit_logs')
+                                                ->whereColumn('audit_logs.request_id', 'requests.id')
+                                                ->where('audit_logs.action', 'Step completed')
+                                                ->whereRaw('audit_logs.notes LIKE CONCAT("%", workflow_steps.name, "%")');
                                         });
                                 });
                         });
@@ -312,11 +318,26 @@ class RequestController extends Controller
             });
         }
 
-        $requests = $query->orderBy('created_at', 'desc')->get();
+        // Get pagination parameters
+        $perPage = $request->get('per_page', 10); // Default 10 items per page
+        $perPage = min($perPage, 50); // Maximum 50 items per page
+
+        $requests = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $requests
+            'data' => $requests->items(),
+            'pagination' => [
+                'current_page' => $requests->currentPage(),
+                'last_page' => $requests->lastPage(),
+                'per_page' => $requests->perPage(),
+                'total' => $requests->total(),
+                'from' => $requests->firstItem(),
+                'to' => $requests->lastItem(),
+                'has_more_pages' => $requests->hasMorePages(),
+                'prev_page_url' => $requests->previousPageUrl(),
+                'next_page_url' => $requests->nextPageUrl()
+            ]
         ]);
     }
 
@@ -1018,11 +1039,26 @@ class RequestController extends Controller
                 }
             }
 
-            $requests = $query->orderBy('created_at', 'desc')->get();
+            // Get pagination parameters
+            $perPage = $request->get('per_page', 10); // Default 10 items per page
+            $perPage = min($perPage, 50); // Maximum 50 items per page
+
+            $requests = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
             return response()->json([
                 'success' => true,
-                'data' => $requests
+                'data' => $requests->items(),
+                'pagination' => [
+                    'current_page' => $requests->currentPage(),
+                    'last_page' => $requests->lastPage(),
+                    'per_page' => $requests->perPage(),
+                    'total' => $requests->total(),
+                    'from' => $requests->firstItem(),
+                    'to' => $requests->lastItem(),
+                    'has_more_pages' => $requests->hasMorePages(),
+                    'prev_page_url' => $requests->previousPageUrl(),
+                    'next_page_url' => $requests->nextPageUrl()
+                ]
             ]);
 
         } catch (\Exception $e) {

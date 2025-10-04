@@ -3,6 +3,7 @@ import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { TableRowSkeleton, CardSkeleton } from '../Components/SkeletonLoader'
+import Pagination from '../Components/Pagination'
 
 export default function Requests({ auth }) {
     const [requests, setRequests] = useState([])
@@ -10,10 +11,20 @@ export default function Requests({ auth }) {
     const [searchTerm, setSearchTerm] = useState('')
     const [statusFilter, setStatusFilter] = useState('all')
     const [activeTab, setActiveTab] = useState('all-requests') // All users see all requests by default
+    const [pagination, setPagination] = useState(null)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [perPage, setPerPage] = useState(10)
+    const [selectedRequests, setSelectedRequests] = useState([])
+    const [isDeleting, setIsDeleting] = useState(false)
 
     useEffect(() => {
         fetchRequests()
-    }, [statusFilter, activeTab])
+    }, [statusFilter, activeTab, currentPage, perPage])
+
+    // Clear selections when search term changes
+    useEffect(() => {
+        setSelectedRequests([])
+    }, [searchTerm])
 
     const fetchRequests = async () => {
         try {
@@ -26,9 +37,14 @@ export default function Requests({ auth }) {
             // Add tab parameter
             params.append('tab', activeTab)
 
+            // Add pagination parameters
+            params.append('page', currentPage)
+            params.append('per_page', perPage)
+
             const response = await axios.get(`/api/requests?${params.toString()}`)
             if (response.data.success) {
-                setRequests(response.data.data.data || response.data.data)
+                setRequests(response.data.data || [])
+                setPagination(response.data.pagination || null)
             }
         } catch (error) {
             console.error('Error fetching requests:', error)
@@ -64,23 +80,16 @@ export default function Requests({ auth }) {
         return !(financeApprovalCompleted || financeApprovalRejected);
     };
 
+    // Since we're now using server-side pagination, we'll filter on the client side only for search
+    // Status filtering is handled on the server side
     const filteredRequests = requests.filter(request => {
+        if (!searchTerm) return true
+
         const employeeName = request.employee?.full_name || request.employee?.name || `User Deleted (ID: ${request.employee_id})`
         const matchesSearch = request.item.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             employeeName.toLowerCase().includes(searchTerm.toLowerCase())
 
-        // Check status filter
-        let matchesStatus = true
-        if (statusFilter !== 'all') {
-            if (statusFilter === 'Delayed') {
-                // Check if request is delayed by looking at audit logs
-                matchesStatus = isRequestDelayed(request)
-            } else {
-                matchesStatus = request.status === statusFilter
-            }
-        }
-
-        return matchesSearch && matchesStatus
+        return matchesSearch
     })
 
     const canSubmitRequest = () => {
@@ -167,6 +176,83 @@ export default function Requests({ auth }) {
         return 'View and manage your requests.'
     }
 
+    // Pagination handlers
+    const handlePageChange = (page) => {
+        setCurrentPage(page)
+    }
+
+    const handlePerPageChange = (newPerPage) => {
+        setPerPage(newPerPage)
+        setCurrentPage(1) // Reset to first page when changing per page
+    }
+
+    // Reset to first page when filters change
+    const handleStatusFilterChange = (status) => {
+        setStatusFilter(status)
+        setCurrentPage(1)
+        setSelectedRequests([]) // Clear selections when changing filters
+    }
+
+    const handleTabChange = (tab) => {
+        setActiveTab(tab)
+        setCurrentPage(1)
+        setSelectedRequests([]) // Clear selections when changing tabs
+    }
+
+    // Checkbox selection handlers
+    const handleSelectAll = (e) => {
+        if (e.target.checked) {
+            const selectableRequests = filteredRequests.filter(request => {
+                // Admin can select all requests
+                if (auth.user.role?.name === 'admin') return true
+                // Other users can only select their own requests
+                return request.employee_id === auth.user.id
+            })
+            setSelectedRequests(selectableRequests.map(request => request.id))
+        } else {
+            setSelectedRequests([])
+        }
+    }
+
+    const handleSelectRequest = (requestId, isChecked) => {
+        if (isChecked) {
+            setSelectedRequests(prev => [...prev, requestId])
+        } else {
+            setSelectedRequests(prev => prev.filter(id => id !== requestId))
+        }
+    }
+
+    const canSelectRequest = (request) => {
+        // Admin can select all requests
+        if (auth.user.role?.name === 'admin') return true
+        // Other users can only select their own requests
+        return request.employee_id === auth.user.id
+    }
+
+    // Bulk delete functionality
+    const handleBulkDelete = async () => {
+        if (selectedRequests.length === 0) return
+
+        try {
+            setIsDeleting(true)
+            const response = await axios.post('/api/requests/bulk-delete', {
+                request_ids: selectedRequests
+            })
+
+            if (response.data.success) {
+                // Clear selections
+                setSelectedRequests([])
+
+                // Refresh the requests list
+                fetchRequests()
+            }
+        } catch (error) {
+            console.error('Error deleting requests:', error)
+        } finally {
+            setIsDeleting(false)
+        }
+    }
+
     return (
         <AppLayout title={getPageTitle()} auth={auth}>
             <div className="space-y-6">
@@ -175,7 +261,7 @@ export default function Requests({ auth }) {
                     <h1 className="text-2xl font-bold text-gray-900">{getPageTitle()}</h1>
                     <p className="text-gray-600 mt-1">{getPageDescription()}</p>
                 </div>
-                {/* Search, Filter and New Request */}
+                {/* Search, Filter and Actions */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                         <div className="flex-1 max-w-md">
@@ -196,7 +282,7 @@ export default function Requests({ auth }) {
                         </div>
                         <select
                             value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value)}
+                            onChange={(e) => handleStatusFilterChange(e.target.value)}
                             className="block w-full sm:w-40 px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm"
                         >
                             <option value="all">All Status</option>
@@ -210,21 +296,48 @@ export default function Requests({ auth }) {
                             <option value="Cancelled">Cancelled</option>
                         </select>
                     </div>
-                    {canSubmitRequest() && (
-                        <Link
-                            href="/requests/new"
-                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-center sm:text-left"
-                        >
-                            New Request
-                        </Link>
-                    )}
+                    <div className="flex flex-col sm:flex-row gap-2">
+                        {/* Delete Button - Show when requests are selected */}
+                        {selectedRequests.length > 0 && (
+                            <button
+                                onClick={handleBulkDelete}
+                                disabled={isDeleting}
+                                className="bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white px-4 py-2 rounded-md font-medium text-center sm:text-left flex items-center gap-2"
+                            >
+                                {isDeleting ? (
+                                    <>
+                                        <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Deleting...
+                                    </>
+                                ) : (
+                                    <>
+                                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                        </svg>
+                                        Delete ({selectedRequests.length})
+                                    </>
+                                )}
+                            </button>
+                        )}
+                        {canSubmitRequest() && (
+                            <Link
+                                href="/requests/new"
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium text-center sm:text-left"
+                            >
+                                New Request
+                            </Link>
+                        )}
+                    </div>
                 </div>
 
                 {/* Tabs */}
                 <div className="tab-container">
                     <nav className="tab-nav">
                         <button
-                            onClick={() => setActiveTab('all-requests')}
+                            onClick={() => handleTabChange('all-requests')}
                             className={`tab-button ${
                                 activeTab === 'all-requests' ? 'active' : ''
                             }`}
@@ -232,7 +345,7 @@ export default function Requests({ auth }) {
                             All Requests
                         </button>
                         <button
-                            onClick={() => setActiveTab('my-requests')}
+                            onClick={() => handleTabChange('my-requests')}
                             className={`tab-button ${
                                 activeTab === 'my-requests' ? 'active' : ''
                             }`}
@@ -249,6 +362,16 @@ export default function Requests({ auth }) {
                         <table className="min-w-full divide-y divide-gray-200">
                             <thead className="bg-gray-50">
                                 <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <div className="custom-checkbox">
+                                            <input
+                                                type="checkbox"
+                                                onChange={handleSelectAll}
+                                                checked={selectedRequests.length > 0 && selectedRequests.length === filteredRequests.filter(canSelectRequest).length}
+                                            />
+                                            <span className="checkmark"></span>
+                                        </div>
+                                    </th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                         ID
                                     </th>
@@ -277,10 +400,24 @@ export default function Requests({ auth }) {
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
                                 {loading ? (
-                                    <TableRowSkeleton columns={8} rows={8} />
+                                    <TableRowSkeleton columns={9} rows={8} />
                                 ) : (
                                     filteredRequests.map((request) => (
                                         <tr key={request.id} className="hover:bg-gray-50">
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                                {canSelectRequest(request) ? (
+                                                    <div className="custom-checkbox">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedRequests.includes(request.id)}
+                                                            onChange={(e) => handleSelectRequest(request.id, e.target.checked)}
+                                                        />
+                                                        <span className="checkmark"></span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="h-5 w-5"></div>
+                                                )}
+                                            </td>
                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                                                 #{request.id}
                                             </td>
@@ -339,11 +476,23 @@ export default function Requests({ auth }) {
                             filteredRequests.map((request) => (
                                 <div key={request.id} className="bg-white shadow-sm rounded-lg p-4 border border-gray-200">
                                     <div className="flex items-start justify-between mb-3">
-                                        <div className="flex-1 min-w-0">
-                                            <h3 className="text-sm font-medium text-gray-900 truncate">
-                                                {request.item}
-                                            </h3>
-                                            <p className="text-xs text-gray-500">#{request.id}</p>
+                                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                                            {canSelectRequest(request) && (
+                                                <div className="custom-checkbox mt-1">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={selectedRequests.includes(request.id)}
+                                                        onChange={(e) => handleSelectRequest(request.id, e.target.checked)}
+                                                    />
+                                                    <span className="checkmark"></span>
+                                                </div>
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                <h3 className="text-sm font-medium text-gray-900 truncate">
+                                                    {request.item}
+                                                </h3>
+                                                <p className="text-xs text-gray-500">#{request.id}</p>
+                                            </div>
                                         </div>
                                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
                                             {getStatusDisplayText(request.status, request)}
@@ -398,6 +547,19 @@ export default function Requests({ auth }) {
                                     : 'Get started by creating your first request'
                                 }
                             </p>
+                        </div>
+                    )}
+
+                    {/* Pagination */}
+                    {!loading && pagination && (
+                        <div className="mt-6">
+                            <Pagination
+                                pagination={pagination}
+                                onPageChange={handlePageChange}
+                                onPerPageChange={handlePerPageChange}
+                                perPageOptions={[10, 25, 50]}
+                                className="bg-white p-4 rounded-lg shadow-sm"
+                            />
                         </div>
                     )}
 

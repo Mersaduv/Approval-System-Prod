@@ -53,11 +53,26 @@ class UserController extends Controller
             });
         }
 
-        $users = $query->orderBy('full_name')->paginate(15);
+        // Get pagination parameters
+        $perPage = $request->get('per_page', 10); // Default 10 items per page
+        $perPage = min($perPage, 50); // Maximum 50 items per page
+
+        $users = $query->orderBy('full_name')->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $users
+            'data' => $users->items(),
+            'pagination' => [
+                'current_page' => $users->currentPage(),
+                'last_page' => $users->lastPage(),
+                'per_page' => $users->perPage(),
+                'total' => $users->total(),
+                'from' => $users->firstItem(),
+                'to' => $users->lastItem(),
+                'has_more_pages' => $users->hasMorePages(),
+                'prev_page_url' => $users->previousPageUrl(),
+                'next_page_url' => $users->nextPageUrl()
+            ]
         ]);
     }
 

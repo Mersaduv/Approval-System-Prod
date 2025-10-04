@@ -134,6 +134,9 @@ export default function Settings({ auth }) {
     })
     const [workflowLoading, setWorkflowLoading] = useState(true)
     const [isReordering, setIsReordering] = useState(false)
+    const [workflowActiveTab, setWorkflowActiveTab] = useState('regular')
+    const [regularWorkflowSteps, setRegularWorkflowSteps] = useState([])
+    const [leaveWorkflowSteps, setLeaveWorkflowSteps] = useState([])
 
     const sensors = useSensors(
         useSensor(PointerSensor),
@@ -201,10 +204,16 @@ export default function Settings({ auth }) {
         try {
             setWorkflowLoading(true)
 
-            // Fetch workflow steps summary
-            const stepsResponse = await axios.get('/api/admin/workflow-steps/summary')
-            if (stepsResponse.data.success) {
-                setWorkflowSteps(stepsResponse.data.data)
+            // Fetch regular workflow steps
+            const regularResponse = await axios.get('/api/admin/workflow-steps?category=regular')
+            if (regularResponse.data.success) {
+                setRegularWorkflowSteps(regularResponse.data.data)
+            }
+
+            // Fetch leave workflow steps
+            const leaveResponse = await axios.get('/api/admin/workflow-steps?category=leave')
+            if (leaveResponse.data.success) {
+                setLeaveWorkflowSteps(leaveResponse.data.data)
             }
 
             // Fetch workflow statistics
@@ -225,10 +234,15 @@ export default function Settings({ auth }) {
 
         if (active.id !== over.id) {
             setIsReordering(true)
-            const oldIndex = workflowSteps.findIndex(step => step.id === active.id)
-            const newIndex = workflowSteps.findIndex(step => step.id === over.id)
 
-            const newOrder = arrayMove(workflowSteps, oldIndex, newIndex)
+            // Determine which steps array to use based on active tab
+            const currentSteps = workflowActiveTab === 'regular' ? regularWorkflowSteps : leaveWorkflowSteps
+            const setCurrentSteps = workflowActiveTab === 'regular' ? setRegularWorkflowSteps : setLeaveWorkflowSteps
+
+            const oldIndex = currentSteps.findIndex(step => step.id === active.id)
+            const newIndex = currentSteps.findIndex(step => step.id === over.id)
+
+            const newOrder = arrayMove(currentSteps, oldIndex, newIndex)
 
             // Update order_index for each step based on new position
             const updatedOrder = newOrder.map((step, index) => ({
@@ -237,23 +251,23 @@ export default function Settings({ auth }) {
             }))
 
             // Update local state immediately for better UX
-            setWorkflowSteps(updatedOrder)
+            setCurrentSteps(updatedOrder)
 
             try {
-                const stepIds = updatedOrder.map(step => step.id)
+                const stepIds = updatedOrder.map(step => parseInt(step.id))
                 const response = await axios.post('/api/admin/workflow-steps/reorder', {
                     step_ids: stepIds
                 })
 
                 if (!response.data.success) {
                     // Revert on failure
-                    setWorkflowSteps(workflowSteps)
+                    setCurrentSteps(currentSteps)
                     showAlertMessage('Error reordering workflow steps', 'error')
                 }
             } catch (error) {
                 console.error('Error reordering workflow steps:', error)
                 // Revert on error
-                setWorkflowSteps(workflowSteps)
+                setCurrentSteps(currentSteps)
                 showAlertMessage('Error reordering workflow steps', 'error')
             } finally {
                 setIsReordering(false)
@@ -692,46 +706,120 @@ export default function Settings({ auth }) {
                                         className="text-blue-600 hover:text-blue-800 text-xs"
                                         disabled={workflowLoading || isReordering}
                                     >
-                                        {workflowLoading ? 'Loading...' : isReordering ? 'Reordering...' : 'Refresh'}
+                                        {workflowLoading ? 'Loading...' : isReordering ? 'Reordering...' : ''}
                                     </button>
+                                </div>
+
+                                {/* Workflow Steps Tabs */}
+                                <div className="mb-4">
+                                    <nav className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+                                        <button
+                                            onClick={() => setWorkflowActiveTab('regular')}
+                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                                workflowActiveTab === 'regular'
+                                                    ? 'bg-white text-blue-600 shadow-sm'
+                                                    : 'text-gray-600 hover:text-gray-900'
+                                            }`}
+                                        >
+                                            Regular Requests
+                                        </button>
+                                        <button
+                                            onClick={() => setWorkflowActiveTab('leave')}
+                                            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                                workflowActiveTab === 'leave'
+                                                    ? 'bg-white text-blue-600 shadow-sm'
+                                                    : 'text-gray-600 hover:text-gray-900'
+                                            }`}
+                                        >
+                                            Leave Requests
+                                        </button>
+                                    </nav>
                                 </div>
 
                                 {workflowLoading ? (
                                     <div className="flex justify-center items-center py-4">
                                         <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                                     </div>
-                                ) : workflowSteps.length > 0 ? (
-                                    <DndContext
-                                        sensors={sensors}
-                                        collisionDetection={closestCenter}
-                                        onDragEnd={handleDragEnd}
-                                    >
-                                        <SortableContext
-                                            items={workflowSteps.map(step => step.id)}
-                                            strategy={verticalListSortingStrategy}
-                                        >
-                                            <div className="space-y-2">
-                                                {isReordering && (
-                                                    <div className="flex items-center justify-center py-2">
-                                                        <div className="flex items-center gap-2 text-blue-600">
-                                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                                                            <span className="text-xs">Reordering steps...</span>
-                                                        </div>
+                                ) : (
+                                    <>
+                                        {/* Regular Requests Tab */}
+                                        {workflowActiveTab === 'regular' && (
+                                            <div>
+                                                {regularWorkflowSteps.length > 0 ? (
+                                                    <DndContext
+                                                        sensors={sensors}
+                                                        collisionDetection={closestCenter}
+                                                        onDragEnd={handleDragEnd}
+                                                    >
+                                                        <SortableContext
+                                                            items={regularWorkflowSteps.map(step => step.id)}
+                                                            strategy={verticalListSortingStrategy}
+                                                        >
+                                                            <div className="space-y-2">
+                                                                {isReordering && (
+                                                                    <div className="flex items-center justify-center py-2">
+                                                                        <div className="flex items-center gap-2 text-blue-600">
+                                                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                                                            <span className="text-xs">Reordering steps...</span>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {regularWorkflowSteps.map((step) => (
+                                                                    <SortableWorkflowStep
+                                                                        key={step.id}
+                                                                        step={step}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </SortableContext>
+                                                    </DndContext>
+                                                ) : (
+                                                    <div className="text-center py-4">
+                                                        <p className="text-sm text-gray-500">No regular workflow steps configured</p>
                                                     </div>
                                                 )}
-                                                {workflowSteps.map((step) => (
-                                                    <SortableWorkflowStep
-                                                        key={step.id}
-                                                        step={step}
-                                                    />
-                                                ))}
                                             </div>
-                                        </SortableContext>
-                                    </DndContext>
-                                ) : (
-                                    <div className="text-center py-4">
-                                        <p className="text-sm text-gray-500">No workflow steps configured</p>
-                                    </div>
+                                        )}
+
+                                        {/* Leave Requests Tab */}
+                                        {workflowActiveTab === 'leave' && (
+                                            <div>
+                                                {leaveWorkflowSteps.length > 0 ? (
+                                                    <DndContext
+                                                        sensors={sensors}
+                                                        collisionDetection={closestCenter}
+                                                        onDragEnd={handleDragEnd}
+                                                    >
+                                                        <SortableContext
+                                                            items={leaveWorkflowSteps.map(step => step.id)}
+                                                            strategy={verticalListSortingStrategy}
+                                                        >
+                                                            <div className="space-y-2">
+                                                                {isReordering && (
+                                                                    <div className="flex items-center justify-center py-2">
+                                                                        <div className="flex items-center gap-2 text-blue-600">
+                                                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                                                                            <span className="text-xs">Reordering steps...</span>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
+                                                                {leaveWorkflowSteps.map((step) => (
+                                                                    <SortableWorkflowStep
+                                                                        key={step.id}
+                                                                        step={step}
+                                                                    />
+                                                                ))}
+                                                            </div>
+                                                        </SortableContext>
+                                                    </DndContext>
+                                                ) : (
+                                                    <div className="text-center py-4">
+                                                        <p className="text-sm text-gray-500">No leave workflow steps configured</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
 

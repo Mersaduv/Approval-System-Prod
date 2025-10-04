@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Request as RequestModel;
+use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Models\Role;
 use App\Models\ApprovalRule;
@@ -355,8 +356,9 @@ class WorkflowService
      */
     public function processApprovalWorkflowOptimized(RequestModel $request): void
     {
-        // Use cached workflow steps
-        $steps = CacheService::getActiveWorkflowSteps();
+        // Determine request category and use appropriate workflow steps
+        $category = WorkflowStep::getRequestCategory($request);
+        $steps = CacheService::getActiveWorkflowSteps($category);
 
         if ($steps->isEmpty()) {
             // Fallback to legacy system if no dynamic steps are configured
@@ -2477,7 +2479,8 @@ class WorkflowService
 
         return Cache::remember($cacheKey, 300, function () use ($request) {
             // Get applicable workflow steps for this request (cached)
-            $steps = CacheService::getActiveWorkflowSteps();
+            $category = WorkflowStep::getRequestCategory($request);
+            $steps = CacheService::getActiveWorkflowSteps($category);
 
             if ($steps->isEmpty()) {
                 // Fallback to legacy system
@@ -2631,5 +2634,371 @@ class WorkflowService
                 $this->sendApprovalRequest($request, $admin, 'Admin approval required (no manager in department)');
             }
         }
+    }
+
+    // ============================================
+    // LEAVE REQUEST WORKFLOW METHODS
+    // ============================================
+
+    /**
+     * Process leave request workflow
+     */
+    public function processLeaveRequestWorkflow(LeaveRequest $leaveRequest): void
+    {
+        // Get workflow steps for leave requests
+        $steps = WorkflowStep::where('step_category', 'leave')
+            ->where('is_active', true)
+            ->orderBy('order_index')
+            ->get();
+
+        if ($steps->isEmpty()) {
+            // Fallback to simple manager approval if no workflow steps defined
+            $this->processSimpleLeaveApproval($leaveRequest);
+            return;
+        }
+
+        // Process the first workflow step
+        $this->processLeaveWorkflowStep($leaveRequest, $steps->first());
+    }
+
+    /**
+     * Process a specific leave workflow step
+     */
+    private function processLeaveWorkflowStep(LeaveRequest $leaveRequest, WorkflowStep $step): void
+    {
+        // Get assigned users for this step
+        $assignedUsers = $step->getAssignedUsers($leaveRequest);
+
+        if ($assignedUsers->isEmpty()) {
+            // No users assigned, skip to next step
+            $this->processNextLeaveWorkflowStep($leaveRequest, $step);
+            return;
+        }
+
+        // Update leave request status
+        $leaveRequest->update(['status' => 'Pending Approval']);
+
+        // Send notifications to assigned users
+        foreach ($assignedUsers as $user) {
+            $this->sendLeaveApprovalNotification($leaveRequest, $user, $step);
+        }
+
+        // Log the workflow step execution
+        $this->logLeaveAction(
+            $leaveRequest->employee_id,
+            $leaveRequest->id,
+            'Workflow Step Started',
+            "Step '{$step->name}' started - awaiting approval from assigned users"
+        );
+
+        // Send workflow step update notification to employee
+        $this->notificationService->sendLeaveWorkflowStepUpdate(
+            $leaveRequest,
+            $step->name,
+            'started',
+            'System',
+            "Step '{$step->name}' has been started and is awaiting approval"
+        );
+    }
+
+    /**
+     * Process next leave workflow step
+     */
+    private function processNextLeaveWorkflowStep(LeaveRequest $leaveRequest, WorkflowStep $currentStep): void
+    {
+        $nextStep = WorkflowStep::where('step_category', 'leave')
+            ->where('is_active', true)
+            ->where('order_index', '>', $currentStep->order_index)
+            ->orderBy('order_index')
+            ->first();
+
+        if ($nextStep) {
+            $this->processLeaveWorkflowStep($leaveRequest, $nextStep);
+        } else {
+            // No more steps, approve the leave request
+            $this->finalizeLeaveApproval($leaveRequest);
+        }
+    }
+
+    /**
+     * Simple leave approval (fallback when no workflow steps defined)
+     */
+    private function processSimpleLeaveApproval(LeaveRequest $leaveRequest): void
+    {
+        $employee = $leaveRequest->employee;
+
+        // Find manager in the same department
+        $manager = User::where('department_id', $employee->department_id)
+            ->whereHas('role', function($query) {
+                $query->where('name', 'manager');
+            })
+            ->first();
+
+        if ($manager) {
+            $leaveRequest->update(['status' => 'Pending Approval']);
+            $this->sendLeaveApprovalNotification($leaveRequest, $manager);
+        } else {
+            // No manager found, send to admin
+            $admin = User::whereHas('role', function($query) {
+                $query->where('name', 'admin');
+            })->first();
+
+            if ($admin) {
+                $leaveRequest->update(['status' => 'Pending Approval']);
+                $this->sendLeaveApprovalNotification($leaveRequest, $admin);
+            }
+        }
+    }
+
+    /**
+     * Finalize leave approval
+     */
+    private function finalizeLeaveApproval(LeaveRequest $leaveRequest, int $approverId = null, string $notes = null): void
+    {
+        $leaveRequest->update([
+            'status' => 'Approved',
+            'approved_by' => $approverId,
+            'approved_at' => now(),
+            'manager_notes' => $notes
+        ]);
+
+        $this->logLeaveAction(
+            $approverId ?? $leaveRequest->employee_id,
+            $leaveRequest->id,
+            'Leave Request Approved',
+            'Leave request has been fully approved through workflow'
+        );
+
+        // Send notification to employee
+        $this->sendLeaveStatusNotification($leaveRequest, 'approved');
+    }
+
+    /**
+     * Get the current workflow step for a leave request
+     */
+    private function getCurrentLeaveWorkflowStep(LeaveRequest $leaveRequest): ?WorkflowStep
+    {
+        $steps = WorkflowStep::where('step_category', 'leave')
+            ->where('is_active', true)
+            ->orderBy('order_index')
+            ->get();
+
+        if ($steps->isEmpty()) {
+            return null;
+        }
+
+        // Find the first step that hasn't been completed
+        foreach ($steps as $step) {
+            $isCompleted = $leaveRequest->auditLogs()
+                ->where('action', 'like', '%approved%')
+                ->where('notes', 'like', '%' . $step->name . '%')
+                ->exists();
+
+            if (!$isCompleted) {
+                return $step;
+            }
+        }
+
+        return null; // All steps completed
+    }
+
+    /**
+     * Get the next workflow step for a leave request
+     */
+    private function getNextLeaveWorkflowStep(LeaveRequest $leaveRequest, WorkflowStep $currentStep): ?WorkflowStep
+    {
+        $steps = WorkflowStep::where('step_category', 'leave')
+            ->where('is_active', true)
+            ->orderBy('order_index')
+            ->get();
+
+        $currentIndex = $steps->search(function ($step) use ($currentStep) {
+            return $step->id === $currentStep->id;
+        });
+
+        if ($currentIndex === false || $currentIndex >= $steps->count() - 1) {
+            return null; // No next step
+        }
+
+        return $steps[$currentIndex + 1];
+    }
+
+    /**
+     * Approve leave request
+     */
+    public function approveLeaveRequest(int $leaveRequestId, int $approverId, string $notes = null): bool
+    {
+        return DB::transaction(function () use ($leaveRequestId, $approverId, $notes) {
+            $leaveRequest = LeaveRequest::findOrFail($leaveRequestId);
+            $approver = User::findOrFail($approverId);
+
+            // Check if this approver can approve this leave request
+            if (!$this->canApproveLeaveRequest($leaveRequest, $approver)) {
+                throw new \Exception('You are not authorized to approve this leave request');
+            }
+
+            // Get the current workflow step that needs approval
+            $currentStep = $this->getCurrentLeaveWorkflowStep($leaveRequest);
+
+            if (!$currentStep) {
+                throw new \Exception('No current workflow step found for this leave request');
+            }
+
+            // Log the step approval
+            $this->logLeaveAction(
+                $approverId,
+                $leaveRequestId,
+                'Workflow Step Approved',
+                $notes ? "Step '{$currentStep->name}' approved by {$approver->full_name}: {$notes}" : "Step '{$currentStep->name}' approved by {$approver->full_name}"
+            );
+
+            // Send workflow step update notification to employee
+            $this->notificationService->sendLeaveWorkflowStepUpdate(
+                $leaveRequest,
+                $currentStep->name,
+                'approved',
+                $approver->full_name,
+                $notes
+            );
+
+            // Check if there are more steps to process
+            $nextStep = $this->getNextLeaveWorkflowStep($leaveRequest, $currentStep);
+
+            if ($nextStep) {
+                // Process the next step
+                $this->processLeaveWorkflowStep($leaveRequest, $nextStep);
+            } else {
+                // No more steps, finalize the approval
+                $this->finalizeLeaveApproval($leaveRequest, $approverId, $notes);
+            }
+
+            return true;
+        });
+    }
+
+    /**
+     * Reject leave request
+     */
+    public function rejectLeaveRequest(int $leaveRequestId, int $rejectorId, string $reason): bool
+    {
+        return DB::transaction(function () use ($leaveRequestId, $rejectorId, $reason) {
+            $leaveRequest = LeaveRequest::findOrFail($leaveRequestId);
+            $rejector = User::findOrFail($rejectorId);
+
+            // Check if this user can reject this leave request
+            if (!$this->canApproveLeaveRequest($leaveRequest, $rejector)) {
+                throw new \Exception('You are not authorized to reject this leave request');
+            }
+
+            // Update leave request
+            $leaveRequest->update([
+                'status' => 'Rejected',
+                'rejected_by' => $rejectorId,
+                'rejected_at' => now(),
+                'rejection_reason' => $reason
+            ]);
+
+            // Log the rejection
+            $this->logLeaveAction(
+                $rejectorId,
+                $leaveRequestId,
+                'Leave Request Rejected',
+                "Rejected by {$rejector->full_name}: {$reason}"
+            );
+
+            // Send notification to employee
+            $this->sendLeaveStatusNotification($leaveRequest, 'rejected', $reason);
+
+            return true;
+        });
+    }
+
+    /**
+     * Check if user can approve leave request
+     */
+    public function canApproveLeaveRequest(LeaveRequest $leaveRequest, User $user): bool
+    {
+        // Only allow approval if the leave request is in pending approval status
+        if (!in_array($leaveRequest->status, ['Pending', 'Pending Approval'])) {
+            return false;
+        }
+
+        // Get the current workflow step that needs approval
+        $currentStep = $this->getCurrentLeaveWorkflowStep($leaveRequest);
+
+        if (!$currentStep) {
+            // No workflow steps defined, fall back to simple role-based approval
+            if (in_array($user->role->name, ['admin', 'hr'])) {
+                return true;
+            }
+
+            if ($user->role->name === 'manager' && $leaveRequest->employee->department_id === $user->department_id) {
+                return true;
+            }
+
+            return false;
+        }
+
+        // Check if the user is assigned to the current workflow step
+        $assignedUsers = $currentStep->getAssignedUsers($leaveRequest);
+        return $assignedUsers->contains('id', $user->id);
+    }
+
+    /**
+     * Send leave approval notification
+     */
+    private function sendLeaveApprovalNotification(LeaveRequest $leaveRequest, User $approver, WorkflowStep $step = null): void
+    {
+        $stepName = $step ? $step->name : 'Leave Approval';
+
+        // Use the same notification system as regular requests - both in-app and email
+        $this->notificationService->sendLeaveApprovalRequest(
+            $leaveRequest,
+            $approver,
+            "Approval required for step: {$stepName}",
+            $stepName
+        );
+
+        // Don't log notification - keep audit trail clean like regular requests
+    }
+
+    /**
+     * Send leave status notification to employee
+     */
+    private function sendLeaveStatusNotification(LeaveRequest $leaveRequest, string $status, string $reason = null): void
+    {
+        $employee = $leaveRequest->employee;
+
+        // Send both in-app and email notifications
+        $this->notificationService->sendLeaveEmployeeNotification(
+            $leaveRequest,
+            $status,
+            $reason
+        );
+
+        // Log notification
+        $this->logLeaveAction(
+            $employee->id,
+            $leaveRequest->id,
+            'Status Notification Sent',
+            "Status notification sent to {$employee->full_name}: {$status}"
+        );
+    }
+
+    /**
+     * Log leave request action
+     */
+    private function logLeaveAction(int $userId, int $leaveRequestId, string $action, string $notes = null, array $oldValues = null, array $newValues = null): void
+    {
+        AuditLog::create([
+            'user_id' => $userId,
+            'leave_request_id' => $leaveRequestId,
+            'action' => $action,
+            'notes' => $notes,
+            'old_values' => $oldValues,
+            'new_values' => $newValues,
+            'ip_address' => request()->ip(),
+            'user_agent' => request()->userAgent(),
+        ]);
     }
 }

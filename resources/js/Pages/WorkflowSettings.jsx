@@ -1,4 +1,4 @@
-import { Head } from '@inertiajs/react'
+import { Head, Link } from '@inertiajs/react'
 import AppLayout from '../Layouts/AppLayout'
 import { useState, useEffect } from 'react'
 import axios from 'axios'
@@ -167,6 +167,8 @@ export default function WorkflowSettings({ auth }) {
     const [showConfirm, setShowConfirm] = useState(false)
     const [confirmAction, setConfirmAction] = useState(null)
     const [isReordering, setIsReordering] = useState(false)
+    const [activeTab, setActiveTab] = useState('regular-requests')
+    const [currentCategory, setCurrentCategory] = useState('regular')
 
     const sensors = useSensors(
         useSensor(PointerSensor),
@@ -206,9 +208,15 @@ export default function WorkflowSettings({ auth }) {
         }
     }, [assignableEntities])
 
-    const fetchSteps = async () => {
+    const fetchSteps = async (category = null) => {
         try {
-            const response = await axios.get('/api/admin/workflow-steps')
+            const categoryToFetch = category || currentCategory
+            const params = new URLSearchParams()
+            if (categoryToFetch) {
+                params.append('category', categoryToFetch)
+            }
+
+            const response = await axios.get(`/api/admin/workflow-steps?${params.toString()}`)
             if (response.data.success) {
                 setSteps(response.data.data)
             }
@@ -238,12 +246,13 @@ export default function WorkflowSettings({ auth }) {
             description: '',
             order_index: steps.length,
             is_active: true,
-            step_type: 'approval',
+            step_type: currentCategory === 'leave' ? 'approval' : 'approval', // Always approval for leave requests
+            step_category: currentCategory,
             timeout_hours: null, // Unlimited by default
             auto_approve: false,
-            conditions: [],
+            conditions: [], // Always empty for leave requests
             assignments: [{
-                assignment_type: 'admin',
+                assignment_type: currentCategory === 'leave' ? 'manager' : 'admin', // Default to manager for leave requests
                 user_id: '',
                 is_required: true
             }]
@@ -255,8 +264,10 @@ export default function WorkflowSettings({ auth }) {
         setEditingStep(step)
 
         // Ensure assignableEntities are loaded before converting assignments
-        if (assignableEntities.roles.length === 0) {
+        if (assignableEntities.roles.length === 0 || assignableEntities.users.length === 0) {
             fetchAssignableEntities().then(() => {
+                const convertedAssignments = (step.assignments || []).map(assignment => convertAssignmentToNewFormat(assignment));
+
                 setStepForm({
                     name: step.name,
                     description: step.description || '',
@@ -265,12 +276,14 @@ export default function WorkflowSettings({ auth }) {
                     step_type: step.step_type,
                     timeout_hours: step.timeout_hours,
                     auto_approve: step.auto_approve || false,
-                    conditions: step.conditions || [],
-                    assignments: (step.assignments || []).map(assignment => convertAssignmentToNewFormat(assignment))
+                    conditions: currentCategory === 'leave' ? [] : (step.conditions || []), // Clear conditions for leave requests
+                    assignments: convertedAssignments
                 })
                 setShowModal(true)
             })
         } else {
+            const convertedAssignments = (step.assignments || []).map(assignment => convertAssignmentToNewFormat(assignment));
+
             setStepForm({
                 name: step.name,
                 description: step.description || '',
@@ -279,8 +292,8 @@ export default function WorkflowSettings({ auth }) {
                 step_type: step.step_type,
                 timeout_hours: step.timeout_hours,
                 auto_approve: step.auto_approve || false,
-                conditions: step.conditions || [],
-                assignments: (step.assignments || []).map(assignment => convertAssignmentToNewFormat(assignment))
+                conditions: currentCategory === 'leave' ? [] : (step.conditions || []), // Clear conditions for leave requests
+                assignments: convertedAssignments
             })
             setShowModal(true)
         }
@@ -293,7 +306,7 @@ export default function WorkflowSettings({ auth }) {
             return
         }
 
-        if (!stepForm.step_type) {
+        if (!stepForm.step_type && currentCategory !== 'leave') {
             showAlertMessage('Step type is required', 'error')
             return
         }
@@ -311,9 +324,22 @@ export default function WorkflowSettings({ auth }) {
                     showAlertMessage(`Assignment ${i + 1}: Assignment type is required`, 'error')
                     return
                 }
-                if ((assignment.assignment_type === 'user' || assignment.assignment_type === 'finance') && !assignment.user_id) {
-                    showAlertMessage(`Assignment ${i + 1}: User selection is required`, 'error')
-                    return
+
+                // For regular requests
+                if (currentCategory !== 'leave') {
+                    if ((assignment.assignment_type === 'user' || assignment.assignment_type === 'finance') && !assignment.user_id) {
+                        showAlertMessage(`Assignment ${i + 1}: User selection is required`, 'error')
+                        return
+                    }
+                }
+
+                // For leave requests
+                if (currentCategory === 'leave') {
+                    if ((assignment.assignment_type === 'admin' || assignment.assignment_type === 'hr') && !assignment.user_id) {
+                        showAlertMessage(`Assignment ${i + 1}: User selection is required`, 'error')
+                        return
+                    }
+                    // Manager doesn't need user_id as it's auto-assigned
                 }
             }
         }
@@ -325,7 +351,14 @@ export default function WorkflowSettings({ auth }) {
 
             const method = editingStep ? 'put' : 'post'
 
-            const response = await axios[method](url, stepForm)
+            // Ensure step_type is always 'approval' and conditions are empty for leave requests
+            const formData = {
+                ...stepForm,
+                step_type: currentCategory === 'leave' ? 'approval' : stepForm.step_type,
+                conditions: currentCategory === 'leave' ? [] : stepForm.conditions
+            }
+
+            const response = await axios[method](url, formData)
 
             if (response.data.success) {
                 showAlertMessage(
@@ -502,8 +535,33 @@ export default function WorkflowSettings({ auth }) {
             // Old structure - convert to new
             switch (assignment.assignable_type) {
                 case 'App\\Models\\User':
-                    assignmentType = 'user';
+                    // Set userId first - it's the same for all User assignments
                     userId = assignment.assignable_id ? String(assignment.assignable_id) : '';
+
+                    // For leave requests, we need to determine if this is an admin or hr assignment
+                    if (currentCategory === 'leave') {
+                        // Check if this user is an admin or HR user
+                        const user = assignableEntities.users?.find(u => u.id == assignment.assignable_id);
+                        if (user) {
+                            if (user.role_name === 'admin') {
+                                assignmentType = 'admin';
+                            } else {
+                                // Check if user is from HR department
+                                const deptName = user.department_name?.toLowerCase() || '';
+                                if (deptName.includes('hr') || deptName.includes('human') ||
+                                    deptName.includes('resource') || deptName.includes('منابع') ||
+                                    deptName.includes('انسانی')) {
+                                    assignmentType = 'hr';
+                                } else {
+                                    assignmentType = 'admin'; // Default fallback
+                                }
+                            }
+                        } else {
+                            assignmentType = 'admin'; // Default if user not found
+                        }
+                    } else {
+                        assignmentType = 'user';
+                    }
                     break;
                 case 'App\\Models\\FinanceAssignment':
                     assignmentType = 'finance';
@@ -516,6 +574,14 @@ export default function WorkflowSettings({ auth }) {
                     // Find role name by ID
                     const role = assignableEntities.roles?.find(r => r.id == assignment.assignable_id);
                     assignmentType = role ? role.name : 'admin';
+
+                    // For leave requests, role assignments need to be converted to user assignments
+                    // but we leave userId empty so user can select a specific user
+                    if (currentCategory === 'leave') {
+                        // Keep the assignment type as the role name (admin, hr, etc.)
+                        // but leave userId empty for user selection
+                        userId = '';
+                    }
                     break;
                 case 'App\\Models\\Department':
                     assignmentType = 'admin'; // Default fallback
@@ -530,7 +596,7 @@ export default function WorkflowSettings({ auth }) {
             assignment_type: assignmentType,
             user_id: userId,
             is_required: assignment.is_required
-        }
+        };
     }
 
     const getEntityName = (assignment) => {
@@ -591,7 +657,7 @@ export default function WorkflowSettings({ auth }) {
                                         Workflow Steps Management
                                     </h2>
                                     <p className="text-sm text-gray-600 mt-1">
-                                        Drag and drop steps to reorder them. The order determines the sequence of workflow execution.
+                                        Manage workflow steps for different types of requests.
                                     </p>
                                 </div>
                                 <button
@@ -605,16 +671,54 @@ export default function WorkflowSettings({ auth }) {
                                 </button>
                             </div>
 
-                            <DndContext
-                                sensors={sensors}
-                                collisionDetection={closestCenter}
-                                onDragEnd={handleDragEnd}
-                            >
-                                <SortableContext
-                                    items={steps.map(step => step.id)}
-                                    strategy={verticalListSortingStrategy}
-                                >
-                                    <div className="space-y-4">
+                            {/* Tabs */}
+                            <div className="tab-container mb-6">
+                                <nav className="tab-nav">
+                                    <button
+                                        onClick={() => {
+                                            setActiveTab('regular-requests')
+                                            setCurrentCategory('regular')
+                                            setLoading(true)
+                                            fetchSteps('regular')
+                                        }}
+                                        className={`tab-button ${
+                                            activeTab === 'regular-requests' ? 'active' : ''
+                                        }`}
+                                    >
+                                        Regular Requests
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setActiveTab('leave-requests')
+                                            setCurrentCategory('leave')
+                                            setLoading(true)
+                                            fetchSteps('leave')
+                                        }}
+                                        className={`tab-button ${
+                                            activeTab === 'leave-requests' ? 'active' : ''
+                                        }`}
+                                    >
+                                        Leave Requests
+                                    </button>
+                                </nav>
+                            </div>
+
+                            {/* Tab Content */}
+                            {activeTab === 'regular-requests' && (
+                                <div>
+                                    <p className="text-sm text-gray-600 mb-4">
+                                        Drag and drop steps to reorder them. The order determines the sequence of workflow execution.
+                                    </p>
+                                    <DndContext
+                                        sensors={sensors}
+                                        collisionDetection={closestCenter}
+                                        onDragEnd={handleDragEnd}
+                                    >
+                                        <SortableContext
+                                            items={steps.map(step => step.id)}
+                                            strategy={verticalListSortingStrategy}
+                                        >
+                                            <div className="space-y-4">
                                         {loading ? (
                                             <>
                                                 <WorkflowStepSkeleton />
@@ -657,6 +761,72 @@ export default function WorkflowSettings({ auth }) {
                                     </div>
                                 </SortableContext>
                             </DndContext>
+                                </div>
+                            )}
+
+                            {/* Leave Requests Tab */}
+                            {activeTab === 'leave-requests' && (
+                                <div>
+                                    <p className="text-sm text-gray-600 mb-4">
+                                        Drag and drop steps to reorder them. The order determines the sequence of workflow execution for leave requests.
+                                    </p>
+                                    <DndContext
+                                        sensors={sensors}
+                                        collisionDetection={closestCenter}
+                                        onDragEnd={handleDragEnd}
+                                    >
+                                        <SortableContext
+                                            items={steps.map(step => step.id)}
+                                            strategy={verticalListSortingStrategy}
+                                        >
+                                            <div className="space-y-4">
+                                                {loading ? (
+                                                    <>
+                                                        <WorkflowStepSkeleton />
+                                                        <WorkflowStepSkeleton />
+                                                        <WorkflowStepSkeleton />
+                                                        <WorkflowStepSkeleton />
+                                                        <WorkflowStepSkeleton />
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        {isReordering && (
+                                                            <div className="flex items-center justify-center py-2">
+                                                                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                                                                <span className="ml-2 text-sm text-gray-600">Reordering steps...</span>
+                                                            </div>
+                                                        )}
+                                        {steps.map((step) => (
+                                            <SortableStep
+                                                key={step.id}
+                                                step={step}
+                                                onEdit={handleEditStep}
+                                                onDelete={handleDeleteStep}
+                                                getEntityName={getEntityName}
+                                            />
+                                        ))}
+                                                        {steps.length === 0 && (
+                                                            <div className="text-center py-12">
+                                                                <div className="text-gray-400 text-6xl mb-4">🏖️</div>
+                                                                <h3 className="text-lg font-medium text-gray-900 mb-2">No leave request workflow steps</h3>
+                                                                <p className="text-gray-500 mb-4">
+                                                                    Create your first workflow step to get started with leave request approvals.
+                                                                </p>
+                                                                <button
+                                                                    onClick={handleAddStep}
+                                                                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg"
+                                                                >
+                                                                    Add First Step
+                                                                </button>
+                                                            </div>
+                                                        )}
+                                                    </>
+                                                )}
+                                            </div>
+                                        </SortableContext>
+                                    </DndContext>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -688,20 +858,33 @@ export default function WorkflowSettings({ auth }) {
                                         </div>
                                     </div>
 
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Step Type *
-                                        </label>
-                                        <select
-                                            value={stepForm.step_type}
-                                            onChange={(e) => setStepForm(prev => ({ ...prev, step_type: e.target.value }))}
-                                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="approval">Approval</option>
-                                            <option value="verification">Verification</option>
-                                            <option value="notification">Notification</option>
-                                        </select>
-                                    </div>
+                                    {currentCategory !== 'leave' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Step Type *
+                                            </label>
+                                            <select
+                                                value={stepForm.step_type}
+                                                onChange={(e) => setStepForm(prev => ({ ...prev, step_type: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                            >
+                                                <option value="approval">Approval</option>
+                                                <option value="verification">Verification</option>
+                                                <option value="notification">Notification</option>
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {currentCategory === 'leave' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                Step Type
+                                            </label>
+                                            <div className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-gray-600">
+                                                Approval (Fixed for Leave Requests)
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div>
@@ -790,119 +973,123 @@ export default function WorkflowSettings({ auth }) {
 
                                 </div>
 
-                                {/* Conditions Section */}
-                                <div>
-                                    <div className="flex justify-between items-center mb-2">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700">
-                                                Execution Conditions
-                                            </label>
-                                            <p className="text-xs text-gray-500 mt-1">
-                                                Define conditions that must be met for this step to execute
-                                            </p>
+                                {/* Conditions Section - Only for Regular Requests */}
+                                {currentCategory !== 'leave' && (
+                                    <div>
+                                        <div className="flex justify-between items-center mb-2">
+                                            <div>
+                                                <label className="block text-sm font-medium text-gray-700">
+                                                    Execution Conditions
+                                                </label>
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    Define conditions that must be met for this step to execute
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={addCondition}
+                                                className="text-blue-600 hover:text-blue-800 text-sm"
+                                            >
+                                                + Add Condition
+                                            </button>
                                         </div>
-                                        <button
-                                            type="button"
-                                            onClick={addCondition}
-                                            className="text-blue-600 hover:text-blue-800 text-sm"
-                                        >
-                                            + Add Condition
-                                        </button>
-                                    </div>
 
-                                    {stepForm.conditions.length === 0 ? (
-                                        <div className="text-center py-4 text-gray-500 text-sm">
-                                            <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            <p>No conditions defined. This step will always execute.</p>
-                                            <p className="text-xs mt-1">Click "Add Condition" to set specific requirements.</p>
-                                        </div>
-                                    ) : (
-                                        stepForm.conditions.map((condition, index) => (
-                                            <div key={index} className="flex gap-2 mb-2 items-center">
-                                                <select
-                                                    value={condition.field}
-                                                    onChange={(e) => updateCondition(index, 'field', e.target.value)}
-                                                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                    <option value="amount">Amount</option>
-                                                    <option value="status">Status</option>
-                                                </select>
-
-                                                <select
-                                                    value={condition.operator}
-                                                    onChange={(e) => updateCondition(index, 'operator', e.target.value)}
-                                                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                    {condition.field === 'amount' ? (
-                                                        <>
-                                                            <option value=">">Greater than</option>
-                                                            <option value=">=">Greater than or equal</option>
-                                                            <option value="<">Less than</option>
-                                                            <option value="<=">Less than or equal</option>
-                                                            <option value="=">Equal</option>
-                                                            <option value="!=">Not equal</option>
-                                                        </>
-                                                    ) : condition.field === 'status' ? (
-                                                        <>
-                                                            <option value="=">Equal</option>
-                                                            <option value="!=">Not equal</option>
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <option value="=">Equal</option>
-                                                            <option value="!=">Not equal</option>
-                                                        </>
-                                                    )}
-                                                </select>
-
-                                                {condition.field === 'amount' ? (
-                                                    <input
-                                                        type="number"
-                                                        value={condition.value}
-                                                        onChange={(e) => updateCondition(index, 'value', parseFloat(e.target.value) || 0)}
-                                                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                        placeholder="Amount value"
-                                                        min="0"
-                                                        step="0.01"
-                                                    />
-                                                ) : condition.field === 'status' ? (
+                                        {stepForm.conditions.length === 0 ? (
+                                            <div className="text-center py-4 text-gray-500 text-sm">
+                                                <svg className="mx-auto h-8 w-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                <p>No conditions defined. This step will always execute.</p>
+                                                <p className="text-xs mt-1">Click "Add Condition" to set specific requirements.</p>
+                                            </div>
+                                        ) : (
+                                            stepForm.conditions.map((condition, index) => (
+                                                <div key={index} className="flex gap-2 mb-2 items-center">
                                                     <select
-                                                        value={condition.value}
-                                                        onChange={(e) => updateCondition(index, 'value', e.target.value)}
+                                                        value={condition.field}
+                                                        onChange={(e) => updateCondition(index, 'field', e.target.value)}
                                                         className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                                                     >
-                                                        <option value="">Select Status</option>
-                                                        <option value="pending">Pending</option>
-                                                        <option value="approved">Approved</option>
-                                                        <option value="rejected">Rejected</option>
-                                                        <option value="cancelled">Cancelled</option>
+                                                        <option value="amount">Amount</option>
+                                                        <option value="status">Status</option>
                                                     </select>
-                                                ) : (
-                                                    <input
-                                                        type="text"
-                                                        value={condition.value}
-                                                        onChange={(e) => updateCondition(index, 'value', e.target.value)}
-                                                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                        placeholder="Value"
-                                                    />
-                                                )}
 
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeCondition(index)}
-                                                    className="text-red-600 hover:text-red-800 p-1 flex-shrink-0"
-                                                    title="Remove condition"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                    </svg>
-                                                </button>
-                                            </div>
-                                        ))
-                                    )}
-                                </div>
+                                                    <select
+                                                        value={condition.operator}
+                                                        onChange={(e) => updateCondition(index, 'operator', e.target.value)}
+                                                        className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                    >
+                                                        {condition.field === 'amount' ? (
+                                                            <>
+                                                                <option value=">">Greater than</option>
+                                                                <option value=">=">Greater than or equal</option>
+                                                                <option value="<">Less than</option>
+                                                                <option value="<=">Less than or equal</option>
+                                                                <option value="=">Equal</option>
+                                                                <option value="!=">Not equal</option>
+                                                            </>
+                                                        ) : condition.field === 'status' ? (
+                                                            <>
+                                                                <option value="=">Equal</option>
+                                                                <option value="!=">Not equal</option>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <option value="=">Equal</option>
+                                                                <option value="!=">Not equal</option>
+                                                            </>
+                                                        )}
+                                                    </select>
+
+                                                    {condition.field === 'amount' ? (
+                                                        <input
+                                                            type="number"
+                                                            value={condition.value}
+                                                            onChange={(e) => updateCondition(index, 'value', parseFloat(e.target.value) || 0)}
+                                                            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                            placeholder="Amount value"
+                                                            min="0"
+                                                            step="0.01"
+                                                        />
+                                                    ) : condition.field === 'status' ? (
+                                                        <select
+                                                            value={condition.value}
+                                                            onChange={(e) => updateCondition(index, 'value', e.target.value)}
+                                                            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                        >
+                                                            <option value="">Select Status</option>
+                                                            <option value="pending">Pending</option>
+                                                            <option value="approved">Approved</option>
+                                                            <option value="rejected">Rejected</option>
+                                                            <option value="cancelled">Cancelled</option>
+                                                        </select>
+                                                    ) : (
+                                                        <input
+                                                            type="text"
+                                                            value={condition.value}
+                                                            onChange={(e) => updateCondition(index, 'value', e.target.value)}
+                                                            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                            placeholder="Value"
+                                                        />
+                                                    )}
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeCondition(index)}
+                                                        className="text-red-600 hover:text-red-800 p-1 flex-shrink-0"
+                                                        title="Remove condition"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                )}
+
+
 
                                 {/* Assignments Section */}
                                 <div>
@@ -963,92 +1150,206 @@ export default function WorkflowSettings({ auth }) {
                                                 </div>
                                             )}
 
-                                            {stepForm.assignments.map((assignment, index) => (
-                                        <div key={index} className="flex gap-2 mb-2">
-                                            <select
-                                                value={assignment.assignment_type}
-                                                onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
-                                                className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                    !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                }`}
-                                                required
-                                            >
-                                                <option value="">Select Assignment Type *</option>
-                                                <option value="admin">Admin</option>
-                                                <option value="manager">Manager</option>
-                                                <option value="finance">Finance</option>
-                                                <option value="procurement">Procurement</option>
-                                                <option value="user">User</option>
-                                            </select>
+                                            {/* Regular Requests Assignments */}
+                                            {currentCategory !== 'leave' && stepForm.assignments.map((assignment, index) => (
+                                                <div key={index} className="flex gap-2 mb-2">
+                                                    <select
+                                                        value={assignment.assignment_type}
+                                                        onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
+                                                        className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                            !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                        }`}
+                                                        required
+                                                    >
+                                                        <option value="">Select Assignment Type *</option>
+                                                        <option value="admin">Admin</option>
+                                                        <option value="manager">Manager</option>
+                                                        <option value="finance">Finance</option>
+                                                        <option value="procurement">Procurement</option>
+                                                        <option value="user">User</option>
+                                                    </select>
 
-                                            {assignment.assignment_type === 'user' && (
-                                                <select
-                                                    value={assignment.user_id}
-                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                    className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                    }`}
-                                                    required
-                                                >
-                                                    <option value="">Select User *</option>
-                                                    {assignableEntities.users.map(user => (
-                                                        <option key={user.id} value={user.id}>
-                                                            {user.name} ({user.email})
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
+                                                    {assignment.assignment_type === 'user' && (
+                                                        <select
+                                                            value={assignment.user_id}
+                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                            }`}
+                                                            required
+                                                        >
+                                                            <option value="">Select User *</option>
+                                                            {assignableEntities.users.map(user => (
+                                                                <option key={user.id} value={user.id}>
+                                                                    {user.name} ({user.email})
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )}
 
-                                            {assignment.assignment_type === 'finance' && (
-                                                <select
-                                                    value={assignment.user_id}
-                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                    className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                    }`}
-                                                    required
-                                                >
-                                                    <option value="">Select Finance User *</option>
-                                                    {assignableEntities.users
-                                                        .filter(user => user.department_name === 'Finance')
-                                                        .map(user => (
-                                                            <option key={user.id} value={user.id}>
-                                                                {user.name} ({user.email})
-                                                            </option>
-                                                        ))}
-                                                </select>
-                                            )}
+                                                    {assignment.assignment_type === 'finance' && (
+                                                        <select
+                                                            value={assignment.user_id}
+                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                            }`}
+                                                            required
+                                                        >
+                                                            <option value="">Select Finance User *</option>
+                                                            {assignableEntities.users
+                                                                .filter(user => user.department_name === 'Finance')
+                                                                .map(user => (
+                                                                    <option key={user.id} value={user.id}>
+                                                                        {user.name} ({user.email})
+                                                                    </option>
+                                                                ))}
+                                                        </select>
+                                                    )}
 
+                                                    <div className="checkbox-container assignment-checkbox">
+                                                        <div className="custom-checkbox">
+                                                            <input
+                                                                type="checkbox"
+                                                                id={`assignment_required_${index}`}
+                                                                checked={assignment.is_required}
+                                                                onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
+                                                            />
+                                                            <span className="checkmark"></span>
+                                                        </div>
+                                                        <label
+                                                            htmlFor={`assignment_required_${index}`}
+                                                            className="checkbox-label"
+                                                        >
+                                                            Required
+                                                        </label>
+                                                    </div>
 
-                                            <div className="checkbox-container assignment-checkbox">
-                                                <div className="custom-checkbox">
-                                                    <input
-                                                        type="checkbox"
-                                                        id={`assignment_required_${index}`}
-                                                        checked={assignment.is_required}
-                                                        onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
-                                                    />
-                                                    <span className="checkmark"></span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeAssignment(index)}
+                                                        className="text-red-600 hover:text-red-800 p-1"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
                                                 </div>
-                                                <label
-                                                    htmlFor={`assignment_required_${index}`}
-                                                    className="checkbox-label"
-                                                >
-                                                    Required
-                                                </label>
-                                            </div>
+                                            ))}
 
-                                            <button
-                                                type="button"
-                                                onClick={() => removeAssignment(index)}
-                                                className="text-red-600 hover:text-red-800 p-1"
-                                            >
-                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    ))}
+                                            {/* Leave Requests Assignments */}
+                                            {currentCategory === 'leave' && stepForm.assignments.map((assignment, index) => (
+                                                <div key={index} className="flex gap-2 mb-2">
+                                                    <select
+                                                        value={assignment.assignment_type}
+                                                        onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
+                                                        className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                            !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                        }`}
+                                                        required
+                                                    >
+                                                        <option value="">Select Assignment Type *</option>
+                                                        <option value="admin">Admin</option>
+                                                        <option value="manager">Manager</option>
+                                                        <option value="hr">HR</option>
+                                                    </select>
+
+                                                    {assignment.assignment_type === 'admin' && (
+                                                        <select
+                                                            value={assignment.user_id || ''}
+                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                            }`}
+                                                            required
+                                                        >
+                                                            <option value="">Select Admin User *</option>
+                                                            {assignableEntities.users && assignableEntities.users.length > 0 ? (
+                                                                (() => {
+                                                                    const adminUsers = assignableEntities.users.filter(user => user.role_name === 'admin');
+                                                                    if (adminUsers.length > 0) {
+                                                                        return adminUsers.map(user => (
+                                                                            <option key={user.id} value={String(user.id)}>
+                                                                                {user.name} ({user.email}) - {user.role_name}
+                                                                            </option>
+                                                                        ));
+                                                                    } else {
+                                                                        // Temporary fallback: show all users with their roles for debugging
+                                                                        return assignableEntities.users.map(user => (
+                                                                            <option key={user.id} value={String(user.id)}>
+                                                                                {user.name} ({user.email}) - Role: {user.role_name || 'No Role'}
+                                                                            </option>
+                                                                        ));
+                                                                    }
+                                                                })()
+                                                            ) : (
+                                                                <option value="" disabled>Loading users...</option>
+                                                            )}
+                                                        </select>
+                                                    )}
+
+                                                    {assignment.assignment_type === 'manager' && (
+                                                        <div className="px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-gray-600 flex-1">
+                                                            Department Manager (Auto-assigned based on employee's department)
+                                                        </div>
+                                                    )}
+
+                                                    {assignment.assignment_type === 'hr' && (
+                                                        <select
+                                                            value={assignment.user_id || ''}
+                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                            }`}
+                                                            required
+                                                        >
+                                                            <option value="">Select HR User *</option>
+                                                            {assignableEntities.users
+                                                                .filter(user => {
+                                                                    const deptName = user.department_name?.toLowerCase() || '';
+                                                                    return deptName.includes('hr') ||
+                                                                           deptName.includes('human') ||
+                                                                           deptName.includes('resource') ||
+                                                                           deptName.includes('منابع') ||
+                                                                           deptName.includes('انسانی');
+                                                                })
+                                                                .map(user => (
+                                                                    <option key={user.id} value={String(user.id)}>
+                                                                        {user.name} ({user.email}) - {user.department_name}
+                                                                    </option>
+                                                                ))}
+                                                        </select>
+                                                    )}
+
+                                                    <div className="checkbox-container assignment-checkbox">
+                                                        <div className="custom-checkbox">
+                                                            <input
+                                                                type="checkbox"
+                                                                id={`assignment_required_${index}`}
+                                                                checked={assignment.is_required}
+                                                                onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
+                                                            />
+                                                            <span className="checkmark"></span>
+                                                        </div>
+                                                        <label
+                                                            htmlFor={`assignment_required_${index}`}
+                                                            className="checkbox-label"
+                                                        >
+                                                            Required
+                                                        </label>
+                                                    </div>
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeAssignment(index)}
+                                                        className="text-red-600 hover:text-red-800 p-1"
+                                                    >
+                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                        </svg>
+                                                    </button>
+                                                </div>
+                                            ))}
                                         </>
                                     )}
                                 </div>

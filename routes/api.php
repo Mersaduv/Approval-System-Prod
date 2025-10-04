@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\Admin\SystemSettingsController;
 use App\Http\Controllers\Api\WorkflowStepController;
 use App\Http\Controllers\Api\DelegationController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\LeaveRequestController;
 
 /*
 |--------------------------------------------------------------------------
@@ -36,11 +37,21 @@ Route::middleware(['web', 'auth'])->get('/user', function (Request $request) {
     ]);
 });
 
+// CSRF token endpoint
+Route::middleware(['web', 'auth'])->get('/csrf-token', function () {
+    return response()->json([
+        'success' => true,
+        'csrf_token' => csrf_token()
+    ]);
+});
+
 // Request routes
 Route::middleware(['web', 'auth'])->group(function () {
     // Request management
     Route::get('/requests', [RequestController::class, 'index']);
     Route::post('/requests', [RequestController::class, 'store']);
+    Route::delete('/requests/bulk-delete', [RequestController::class, 'bulkDelete']);
+    Route::post('/requests/bulk-delete', [RequestController::class, 'bulkDelete']);
     Route::get('/requests/{id}', [RequestController::class, 'show']);
     Route::get('/requests/{id}/audit-logs', [RequestController::class, 'auditLogs']);
 
@@ -82,6 +93,15 @@ Route::middleware(['web', 'auth'])->group(function () {
 
     // Profile routes
     Route::post('/validate-current-password', [ProfileController::class, 'validateCurrentPassword']);
+
+    // Leave Request routes
+    Route::get('/leave-requests', [LeaveRequestController::class, 'index']);
+    Route::post('/leave-requests', [LeaveRequestController::class, 'store']);
+    Route::post('/leave-requests/bulk-delete', [LeaveRequestController::class, 'bulkDelete']);
+    Route::get('/leave-requests/common-reasons', [LeaveRequestController::class, 'getCommonReasons']);
+    Route::get('/leave-requests/{id}', [LeaveRequestController::class, 'show']);
+    Route::post('/leave-requests/{id}/approve', [LeaveRequestController::class, 'approve']);
+    Route::post('/leave-requests/{id}/reject', [LeaveRequestController::class, 'reject']);
 
     // Debug routes
     Route::get('/test-session', function () {

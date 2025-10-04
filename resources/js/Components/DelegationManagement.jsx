@@ -3,6 +3,7 @@ import axios from 'axios';
 import AlertModal from './AlertModal';
 import ConfirmationModal from './ConfirmationModal';
 import { CardSkeleton, DelegationItemSkeleton } from './SkeletonLoader';
+import Pagination from './Pagination';
 
 const DelegationManagement = ({ auth }) => {
     const [delegations, setDelegations] = useState([]);
@@ -24,6 +25,9 @@ const DelegationManagement = ({ auth }) => {
     const [confirmAction, setConfirmAction] = useState(null);
     const [confirmData, setConfirmData] = useState(null);
     const [rejectReason, setRejectReason] = useState('');
+    const [pagination, setPagination] = useState(null);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [perPage, setPerPage] = useState(10);
 
     const [formData, setFormData] = useState({
         delegate_id: '',
@@ -44,7 +48,7 @@ const DelegationManagement = ({ auth }) => {
 
     useEffect(() => {
         loadData();
-    }, [activeTab, filter]);
+    }, [activeTab, filter, currentPage, perPage]);
 
     // Load data on component mount
     useEffect(() => {
@@ -77,12 +81,16 @@ const DelegationManagement = ({ auth }) => {
                 endpoint = '/api/delegations/received';
             }
 
-            // Add filter parameter
-            endpoint += `?status=${filter}`;
+            // Add parameters
+            const params = new URLSearchParams();
+            params.append('status', filter);
+            params.append('page', currentPage);
+            params.append('per_page', perPage);
 
             // Load delegations
-            const delegationsRes = await axios.get(endpoint);
-            setDelegations(delegationsRes.data.data.data || []);
+            const delegationsRes = await axios.get(`${endpoint}?${params.toString()}`);
+            setDelegations(delegationsRes.data.data || []);
+            setPagination(delegationsRes.data.pagination || null);
 
             // Load stats
             const statsRes = await axios.get('/api/delegations/stats');
@@ -275,6 +283,27 @@ const DelegationManagement = ({ auth }) => {
         return new Date(dateString).toLocaleDateString();
     };
 
+    // Pagination handlers
+    const handlePageChange = (page) => {
+        setCurrentPage(page);
+    };
+
+    const handlePerPageChange = (newPerPage) => {
+        setPerPage(newPerPage);
+        setCurrentPage(1); // Reset to first page when changing per page
+    };
+
+    // Filter handlers that reset pagination
+    const handleFilterChange = (newFilter) => {
+        setFilter(newFilter);
+        setCurrentPage(1);
+    };
+
+    const handleTabChange = (newTab) => {
+        setActiveTab(newTab);
+        setCurrentPage(1);
+    };
+
     // Remove full page loading - we'll show skeleton loading instead
 
     return (
@@ -331,7 +360,7 @@ const DelegationManagement = ({ auth }) => {
                 <div className="flex space-x-4">
                     <select
                         value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
+                        onChange={(e) => handleFilterChange(e.target.value)}
                         className="border border-gray-300 rounded-md px-3 py-2"
                     >
                         <option value="all">All Status</option>
@@ -352,7 +381,7 @@ const DelegationManagement = ({ auth }) => {
                     ].map((tab) => (
                         <button
                             key={tab.key}
-                            onClick={() => setActiveTab(tab.key)}
+                            onClick={() => handleTabChange(tab.key)}
                             className={`py-2 px-1 border-b-2 font-medium text-sm ${
                                 activeTab === tab.key
                                     ? 'border-blue-500 text-blue-600'
@@ -576,6 +605,19 @@ const DelegationManagement = ({ auth }) => {
                     </ul>
                 )}
             </div>
+
+            {/* Pagination */}
+            {!loading && pagination && (
+                <div className="mt-6">
+                    <Pagination
+                        pagination={pagination}
+                        onPageChange={handlePageChange}
+                        onPerPageChange={handlePerPageChange}
+                        perPageOptions={[10, 25, 50]}
+                        className="bg-white p-4 rounded-lg shadow-sm"
+                    />
+                </div>
+            )}
 
             {/* Create Modal */}
             {showCreateModal && (

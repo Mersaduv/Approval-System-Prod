@@ -44,21 +44,19 @@ class CacheService
     /**
      * Get active workflow steps with caching
      */
-    public static function getActiveWorkflowSteps()
+    public static function getActiveWorkflowSteps($category = null)
     {
         if (!self::isEnabled()) {
-            return WorkflowStep::where('is_active', true)
-                ->orderBy('order_index')
-                ->get();
+            return WorkflowStep::getActiveSteps($category);
         }
 
+        $cacheKey = $category ? self::getKey('workflow_steps') . "_{$category}" : self::getKey('workflow_steps');
+
         return Cache::remember(
-            self::getKey('workflow_steps'),
+            $cacheKey,
             self::getTtl('workflow_steps'),
-            function () {
-                return WorkflowStep::where('is_active', true)
-                    ->orderBy('order_index')
-                    ->get();
+            function () use ($category) {
+                return WorkflowStep::getActiveSteps($category);
             }
         );
     }

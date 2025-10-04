@@ -24,14 +24,21 @@ const AuditTrailGraph = ({ auditLogs, formatDate }) => {
         );
     }
 
+    // Filter out unwanted logs to keep audit trail clean like regular requests
+    const filteredLogs = auditLogs.filter(log =>
+        !log.action.includes('Approval Notification Sent') &&
+        !log.action.includes('Notification Sent')
+    );
+
     // Calculate progress percentage
-    const totalSteps = auditLogs.filter(
-        (log) => log.action === "Step Forwarded" || log.action === "Submitted"
+    const totalSteps = filteredLogs.filter(
+        (log) => log.action === "Step Forwarded" || log.action === "Submitted" || log.action === "Leave Request Created"
     ).length;
-    const completedSteps = auditLogs.filter(
+    const completedSteps = filteredLogs.filter(
         (log) =>
             log.action === "Workflow Step Completed" ||
-            log.action === "All Approvals Complete"
+            log.action === "All Approvals Complete" ||
+            log.action === "Leave Request Approved"
     ).length;
 
     return (
@@ -40,16 +47,17 @@ const AuditTrailGraph = ({ auditLogs, formatDate }) => {
                 {/* Vertical Line - Centered on circles */}
                 <div className="absolute left-[7px] top-2 bottom-0 w-0.5 bg-gray-200"></div>
 
-                {auditLogs.map((log, index) => {
+                {filteredLogs.map((log, index) => {
                     const isCompleted =
                         log.action === "Workflow Step Completed" ||
-                        log.action === "All Approvals Complete";
-                    const isRejected = log.action === "Workflow Step Rejected";
-                    const isCancelled = log.action === "Workflow Step Cancelled";
+                        log.action === "All Approvals Complete" ||
+                        log.action === "Leave Request Approved";
+                    const isRejected = log.action === "Workflow Step Rejected" || log.action === "Leave Request Rejected";
+                    const isCancelled = log.action === "Workflow Step Cancelled" || log.action === "Leave Request Cancelled";
                     const isDelayed = log.action === "Workflow Step Delayed";
                     const isForwarded = log.action === "Step Forwarded";
-                    const isStarted = log.action === "Submitted";
-                    const isLast = index === auditLogs.length - 1;
+                    const isStarted = log.action === "Submitted" || log.action === "Leave Request Created";
+                    const isLast = index === filteredLogs.length - 1;
 
                     return (
                         <div
@@ -110,25 +118,27 @@ const AuditTrailGraph = ({ auditLogs, formatDate }) => {
                                                     : "text-gray-800"
                                             }`}
                                         >
-                                            {log.action ===
-                                            "Workflow Step Started"
+                                            {log.action === "Workflow Step Started"
                                                 ? "Step Started"
-                                                : log.action ===
-                                                  "Workflow Step Completed"
+                                                : log.action === "Workflow Step Completed"
                                                 ? "Step Completed"
-                                                : log.action ===
-                                                  "Workflow Step Rejected"
+                                                : log.action === "Workflow Step Rejected"
                                                 ? "Step Rejected"
-                                                : log.action ===
-                                                  "Workflow Step Cancelled"
+                                                : log.action === "Workflow Step Cancelled"
                                                 ? "Step Cancelled"
-                                                : log.action ===
-                                                  "Workflow Step Delayed"
+                                                : log.action === "Workflow Step Delayed"
                                                 ? "Step Delayed"
                                                 : log.action === "Submitted"
                                                 ? "Request Submitted"
-                                                : log.action ===
-                                                  "All Approvals Complete"
+                                                : log.action === "Leave Request Created"
+                                                ? "Leave Request Created"
+                                                : log.action === "Leave Request Approved"
+                                                ? "Leave Request Approved"
+                                                : log.action === "Leave Request Rejected"
+                                                ? "Leave Request Rejected"
+                                                : log.action === "Leave Request Cancelled"
+                                                ? "Leave Request Cancelled"
+                                                : log.action === "All Approvals Complete"
                                                 ? "All Steps Completed"
                                                 : log.action}
                                         </h4>

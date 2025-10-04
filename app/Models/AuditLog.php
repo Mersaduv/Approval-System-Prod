@@ -12,6 +12,7 @@ class AuditLog extends Model
     protected $fillable = [
         'user_id',
         'request_id',
+        'leave_request_id',
         'action',
         'notes',
         'ip_address',
@@ -35,5 +36,10 @@ class AuditLog extends Model
     public function request()
     {
         return $this->belongsTo(Request::class);
+    }
+
+    public function leaveRequest()
+    {
+        return $this->belongsTo(LeaveRequest::class);
     }
 }

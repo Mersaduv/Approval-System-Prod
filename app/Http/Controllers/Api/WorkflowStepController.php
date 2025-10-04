@@ -20,17 +20,31 @@ class WorkflowStepController extends Controller
     /**
      * Display a listing of workflow steps
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $steps = WorkflowStep::with(['assignments.assignable'])
-            ->orderBy('order_index')
-            ->get();
+        $query = WorkflowStep::with(['assignments.assignable']);
 
-        // Map assignments to include assignment_type and user_id
-        $steps->each(function ($step) {
-            $step->assignments = $step->assignments->map(function ($assignment) {
+        // Filter by category if provided
+        if ($request->has('category')) {
+            $category = $request->get('category');
+            if ($category === 'regular') {
+                $query->where(function($q) {
+                    $q->whereNull('step_category')
+                      ->orWhere('step_category', '')
+                      ->orWhere('step_category', 'regular');
+                });
+            } elseif ($category === 'leave') {
+                $query->where('step_category', 'leave');
+            }
+        }
+
+        $steps = $query->orderBy('order_index')->get();
+
+        // Convert steps to array with properly mapped assignments
+        $stepsArray = $steps->map(function ($step) {
+            $assignmentsArray = $step->assignments->map(function ($assignment) {
                 $assignmentType = $this->getAssignmentTypeFromAssignable($assignment);
-                $userId = in_array($assignmentType, ['user', 'finance']) ? $this->getUserIdFromAssignment($assignment) : null;
+                $userId = in_array($assignmentType, ['user', 'finance', 'admin', 'hr']) ? $this->getUserIdFromAssignment($assignment) : null;
                 $assignableName = $this->getAssignableName($assignment);
 
                 return [
@@ -48,11 +62,28 @@ class WorkflowStepController extends Controller
                     'assignable_name' => $assignableName
                 ];
             });
+
+            return [
+                'id' => $step->id,
+                'name' => $step->name,
+                'description' => $step->description,
+                'order_index' => $step->order_index,
+                'is_active' => $step->is_active,
+                'is_required' => $step->is_required,
+                'step_type' => $step->step_type,
+                'step_category' => $step->step_category,
+                'timeout_hours' => $step->timeout_hours,
+                'auto_approve' => $step->auto_approve,
+                'conditions' => $step->conditions,
+                'created_at' => $step->created_at,
+                'updated_at' => $step->updated_at,
+                'assignments' => $assignmentsArray->toArray()
+            ];
         });
 
         return response()->json([
             'success' => true,
-            'data' => $steps
+            'data' => $stepsArray->toArray()
         ]);
     }
 
@@ -67,12 +98,13 @@ class WorkflowStepController extends Controller
             'order_index' => 'required|integer|min:0',
             'is_active' => 'boolean',
             'step_type' => 'required|in:approval,verification,notification',
+            'step_category' => 'nullable|string|in:regular,leave',
             'timeout_hours' => 'nullable|integer|min:1',
             'auto_approve' => 'boolean',
             'conditions' => 'nullable|array',
             'assignments' => 'array',
-            'assignments.*.assignment_type' => 'required|string|in:admin,manager,finance,procurement,user',
-            'assignments.*.user_id' => 'required_if:assignments.*.assignment_type,user,finance|nullable|integer|exists:users,id',
+            'assignments.*.assignment_type' => 'required|string|in:admin,manager,finance,procurement,user,hr',
+            'assignments.*.user_id' => 'required_if:assignments.*.assignment_type,user,finance,hr|nullable|integer|exists:users,id',
             'assignments.*.is_required' => 'boolean'
         ]);
 
@@ -96,7 +128,7 @@ class WorkflowStepController extends Controller
 
             $stepData = $request->only([
                 'name', 'description', 'order_index', 'is_active',
-                'step_type', 'timeout_hours', 'auto_approve', 'conditions'
+                'step_type', 'step_category', 'timeout_hours', 'auto_approve', 'conditions'
             ]);
             $stepData['is_required'] = true; // All steps are required by default
 
@@ -104,7 +136,7 @@ class WorkflowStepController extends Controller
 
             if ($request->has('assignments') && !$request->auto_approve) {
                 foreach ($request->assignments as $assignmentData) {
-                    $assignableType = $this->getAssignableType($assignmentData['assignment_type']);
+                    $assignableType = $this->getAssignableTypeWithContext($assignmentData);
                     $assignableId = $this->getAssignableId($assignmentData, $assignableType);
 
                     WorkflowStepAssignment::create([
@@ -148,12 +180,13 @@ class WorkflowStepController extends Controller
             'order_index' => 'sometimes|required|integer|min:0',
             'is_active' => 'boolean',
             'step_type' => 'sometimes|required|in:approval,verification,notification',
+            'step_category' => 'nullable|string|in:regular,leave',
             'timeout_hours' => 'nullable|integer|min:1',
             'auto_approve' => 'boolean',
             'conditions' => 'nullable|array',
             'assignments' => 'sometimes|array',
-            'assignments.*.assignment_type' => 'required|string|in:admin,manager,finance,procurement,user',
-            'assignments.*.user_id' => 'required_if:assignments.*.assignment_type,user,finance|nullable|integer|exists:users,id',
+            'assignments.*.assignment_type' => 'required|string|in:admin,manager,finance,procurement,user,hr',
+            'assignments.*.user_id' => 'required_if:assignments.*.assignment_type,user,finance,hr|nullable|integer|exists:users,id',
             'assignments.*.is_required' => 'boolean'
         ]);
 
@@ -177,7 +210,7 @@ class WorkflowStepController extends Controller
 
             $stepData = $request->only([
                 'name', 'description', 'order_index', 'is_active',
-                'step_type', 'timeout_hours', 'auto_approve', 'conditions'
+                'step_type', 'step_category', 'timeout_hours', 'auto_approve', 'conditions'
             ]);
             $stepData['is_required'] = true; // All steps are required by default
 
@@ -192,7 +225,7 @@ class WorkflowStepController extends Controller
                 $step->assignments()->whereNotIn('id', $existingIds)->delete();
 
                 foreach ($request->assignments as $assignmentData) {
-                    $assignableType = $this->getAssignableType($assignmentData['assignment_type']);
+                    $assignableType = $this->getAssignableTypeWithContext($assignmentData);
                     $assignableId = $this->getAssignableId($assignmentData, $assignableType);
 
                     if (isset($assignmentData['id'])) {
@@ -280,7 +313,14 @@ class WorkflowStepController extends Controller
         }
 
         try {
-            WorkflowStep::reorderSteps($request->step_ids);
+            DB::beginTransaction();
+
+            // Update order_index for each step based on its position in the array
+            foreach ($request->step_ids as $index => $stepId) {
+                WorkflowStep::where('id', $stepId)->update(['order_index' => $index]);
+            }
+
+            DB::commit();
 
             return response()->json([
                 'success' => true,
@@ -288,6 +328,7 @@ class WorkflowStepController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json([
                 'success' => false,
                 'message' => 'Failed to reorder workflow steps',
@@ -301,8 +342,8 @@ class WorkflowStepController extends Controller
      */
     public function getAssignableEntities(): JsonResponse
     {
-        $users = User::with('department')
-            ->select('id', 'full_name as name', 'email', 'department_id')
+        $users = User::with(['department', 'role'])
+            ->select('id', 'full_name as name', 'email', 'department_id', 'role_id')
             ->get()
             ->map(function($user) {
                 return [
@@ -310,7 +351,9 @@ class WorkflowStepController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'department_id' => $user->department_id,
-                    'department_name' => $user->department ? $user->department->name : null
+                    'department_name' => $user->department ? $user->department->name : null,
+                    'role_id' => $user->role_id,
+                    'role_name' => $user->role ? $user->role->name : null
                 ];
             });
         $roles = Role::select('id', 'name', 'description')->get();
@@ -463,6 +506,14 @@ class WorkflowStepController extends Controller
                 return $assignable->id;
             case 'App\\Models\\FinanceAssignment':
                 return $assignable->user_id;
+            case 'App\\Models\\Role':
+                // For leave requests with role assignments, we don't return a user_id
+                // as it should be selected by the user in the frontend
+                $workflowStep = WorkflowStep::find($assignment->workflow_step_id);
+                if ($workflowStep && $workflowStep->step_category === 'leave') {
+                    return null;
+                }
+                return null;
             default:
                 return null;
         }
@@ -475,10 +526,41 @@ class WorkflowStepController extends Controller
     {
         switch ($assignmentType) {
             case 'user':
+            case 'hr':
                 return 'App\\Models\\User';
             case 'finance':
                 return 'App\\Models\\FinanceAssignment';
             case 'admin':
+            case 'manager':
+            case 'procurement':
+                return 'App\\Models\\Role';
+            case 'department':
+                return 'App\\\\Models\\\\Department';
+            default:
+                return 'App\\Models\\Role';
+        }
+    }
+
+    /**
+     * Get assignable type based on assignment data (with context)
+     */
+    private function getAssignableTypeWithContext($assignmentData): string
+    {
+        $assignmentType = $assignmentData['assignment_type'];
+
+        switch ($assignmentType) {
+            case 'user':
+            case 'hr':
+                return 'App\\Models\\User';
+            case 'finance':
+                return 'App\\Models\\FinanceAssignment';
+            case 'admin':
+                // For admin assignments with specific user_id, store as User
+                if (isset($assignmentData['user_id']) && !empty($assignmentData['user_id'])) {
+                    return 'App\\Models\\User';
+                }
+                // Otherwise, store as Role
+                return 'App\\Models\\Role';
             case 'manager':
             case 'procurement':
                 return 'App\\Models\\Role';
@@ -511,11 +593,21 @@ class WorkflowStepController extends Controller
                 }
                 return $assignmentData['user_id'] ?? null;
             case 'admin':
+                // For leave requests with specific admin user, store as user assignment
+                if (isset($assignmentData['user_id']) && !empty($assignmentData['user_id'])) {
+                    return $assignmentData['user_id'];
+                }
+                // Otherwise, store as role assignment
+                $role = Role::where('name', $assignmentType)->first();
+                return $role ? $role->id : null;
             case 'manager':
             case 'procurement':
                 // Find role by name
                 $role = Role::where('name', $assignmentType)->first();
                 return $role ? $role->id : null;
+            case 'hr':
+                // For hr in leave requests, assign to specific user
+                return $assignmentData['user_id'] ?? null;
             case 'department':
                 return $assignmentData['department_id'] ?? null;
             default:
@@ -530,6 +622,31 @@ class WorkflowStepController extends Controller
     {
         switch ($assignment->assignable_type) {
             case 'App\\Models\\User':
+                // For leave requests, we need to determine if this is admin, hr, or regular user
+                $workflowStep = WorkflowStep::find($assignment->workflow_step_id);
+                if ($workflowStep && $workflowStep->step_category === 'leave') {
+                    $user = User::with('role')->find($assignment->assignable_id);
+                    if ($user && $user->role) {
+                        if ($user->role->name === 'admin') {
+                            return 'admin';
+                        } else {
+                            // Check if user is from HR department
+                            $user = User::with('department')->find($assignment->assignable_id);
+                            if ($user && $user->department) {
+                                $deptName = strtolower($user->department->name);
+                                if (strpos($deptName, 'hr') !== false ||
+                                    strpos($deptName, 'human') !== false ||
+                                    strpos($deptName, 'resource') !== false ||
+                                    strpos($deptName, 'منابع') !== false ||
+                                    strpos($deptName, 'انسانی') !== false) {
+                                    return 'hr';
+                                }
+                            }
+                            return 'admin'; // Default fallback for leave requests
+                        }
+                    }
+                    return 'admin'; // Default fallback if user not found
+                }
                 return 'user';
             case 'App\\Models\\FinanceAssignment':
                 return 'finance';

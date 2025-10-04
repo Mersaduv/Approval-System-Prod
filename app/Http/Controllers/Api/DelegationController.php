@@ -42,11 +42,26 @@ class DelegationController extends Controller
 
         // Filter by type - removed since delegation_type is no longer used
 
-        $delegations = $query->orderBy('created_at', 'desc')->paginate(20);
+        // Get pagination parameters
+        $perPage = $request->get('per_page', 10); // Default 10 items per page
+        $perPage = min($perPage, 50); // Maximum 50 items per page
+
+        $delegations = $query->orderBy('created_at', 'desc')->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $delegations
+            'data' => $delegations->items(),
+            'pagination' => [
+                'current_page' => $delegations->currentPage(),
+                'last_page' => $delegations->lastPage(),
+                'per_page' => $delegations->perPage(),
+                'total' => $delegations->total(),
+                'from' => $delegations->firstItem(),
+                'to' => $delegations->lastItem(),
+                'has_more_pages' => $delegations->hasMorePages(),
+                'prev_page_url' => $delegations->previousPageUrl(),
+                'next_page_url' => $delegations->nextPageUrl()
+            ]
         ]);
     }
 
@@ -57,14 +72,29 @@ class DelegationController extends Controller
     {
         $user = $request->user();
 
+        // Get pagination parameters
+        $perPage = $request->get('per_page', 10); // Default 10 items per page
+        $perPage = min($perPage, 50); // Maximum 50 items per page
+
         $delegations = Delegation::with(['delegate', 'workflowStep', 'department'])
             ->where('delegator_id', $user->id)
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $delegations
+            'data' => $delegations->items(),
+            'pagination' => [
+                'current_page' => $delegations->currentPage(),
+                'last_page' => $delegations->lastPage(),
+                'per_page' => $delegations->perPage(),
+                'total' => $delegations->total(),
+                'from' => $delegations->firstItem(),
+                'to' => $delegations->lastItem(),
+                'has_more_pages' => $delegations->hasMorePages(),
+                'prev_page_url' => $delegations->previousPageUrl(),
+                'next_page_url' => $delegations->nextPageUrl()
+            ]
         ]);
     }
 
@@ -75,15 +105,30 @@ class DelegationController extends Controller
     {
         $user = $request->user();
 
+        // Get pagination parameters
+        $perPage = $request->get('per_page', 10); // Default 10 items per page
+        $perPage = min($perPage, 50); // Maximum 50 items per page
+
         $delegations = Delegation::with(['delegator', 'workflowStep', 'department'])
             ->where('delegate_id', $user->id)
             ->active()
             ->orderBy('created_at', 'desc')
-            ->paginate(20);
+            ->paginate($perPage);
 
         return response()->json([
             'success' => true,
-            'data' => $delegations
+            'data' => $delegations->items(),
+            'pagination' => [
+                'current_page' => $delegations->currentPage(),
+                'last_page' => $delegations->lastPage(),
+                'per_page' => $delegations->perPage(),
+                'total' => $delegations->total(),
+                'from' => $delegations->firstItem(),
+                'to' => $delegations->lastItem(),
+                'has_more_pages' => $delegations->hasMorePages(),
+                'prev_page_url' => $delegations->previousPageUrl(),
+                'next_page_url' => $delegations->nextPageUrl()
+            ]
         ]);
     }
 

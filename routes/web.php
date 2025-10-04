@@ -61,6 +61,30 @@ Route::middleware('auth')->group(function () {
             ]
         ]);
     });
+
+    // Leave Request routes
+    Route::get('/leave-requests', function () {
+        return inertia('LeaveRequests', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+    Route::get('/leave-requests/new', function () {
+        return inertia('NewLeaveRequest', [
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
+    Route::get('/leave-requests/{id}', function ($id) {
+        return inertia('LeaveRequestView', [
+            'leaveRequestId' => $id,
+            'auth' => [
+                'user' => Auth::user() ? Auth::user()->load(['department', 'role']) : null
+            ]
+        ]);
+    });
     Route::get('/profile', [ProfileController::class, 'index']);
     Route::post('/profile/update', [ProfileController::class, 'updateProfile'])->name('profile.update');
     Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');

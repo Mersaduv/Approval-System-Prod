@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import AlertModal from '../Components/AlertModal'
 import { TableRowSkeleton, CardSkeleton } from '../Components/SkeletonLoader'
+import Pagination from '../Components/Pagination'
 
 export default function Users({ auth }) {
     const [users, setUsers] = useState([])
@@ -31,6 +32,9 @@ export default function Users({ auth }) {
     const [alertMessage, setAlertMessage] = useState('')
     const [alertType, setAlertType] = useState('info')
     const [deleting, setDeleting] = useState(false)
+    const [pagination, setPagination] = useState(null)
+    const [currentPage, setCurrentPage] = useState(1)
+    const [perPage, setPerPage] = useState(10)
 
 
     // Fixed roles - no need to fetch from API
@@ -44,14 +48,36 @@ export default function Users({ auth }) {
     useEffect(() => {
         fetchUsers()
         fetchDepartments()
+    }, [currentPage, perPage])
+
+    useEffect(() => {
+        fetchDepartments()
     }, [])
 
     const fetchUsers = async () => {
         try {
             setLoading(true)
-            const response = await axios.get('/api/admin/users')
+            const params = new URLSearchParams()
+
+            // Add pagination parameters
+            params.append('page', currentPage)
+            params.append('per_page', perPage)
+
+            // Add filter parameters
+            if (roleFilter) {
+                params.append('role_id', roleFilter)
+            }
+            if (departmentFilter) {
+                params.append('department_id', departmentFilter)
+            }
+            if (searchTerm) {
+                params.append('search', searchTerm)
+            }
+
+            const response = await axios.get(`/api/admin/users?${params.toString()}`)
             if (response.data.success) {
-                setUsers(response.data.data.data)
+                setUsers(response.data.data || [])
+                setPagination(response.data.pagination || null)
             }
         } catch (error) {
             console.error('Error fetching users:', error)
@@ -196,14 +222,8 @@ export default function Users({ auth }) {
     }
 
 
-    const filteredUsers = users.filter(user => {
-        const matchesSearch = user.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                            (user.role?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
-        const matchesRole = !roleFilter || user.role_id == roleFilter
-        const matchesDepartment = !departmentFilter || user.department_id == departmentFilter
-        return matchesSearch && matchesRole && matchesDepartment
-    })
+    // Since we're now using server-side pagination and filtering, we use the users directly
+    const filteredUsers = users
 
     const getStatusColor = (status) => {
         switch (status?.toLowerCase()) {
@@ -211,6 +231,39 @@ export default function Users({ auth }) {
             case 'inactive': return 'bg-red-100 text-red-800'
             default: return 'bg-gray-100 text-gray-800'
         }
+    }
+
+    // Pagination handlers
+    const handlePageChange = (page) => {
+        setCurrentPage(page)
+    }
+
+    const handlePerPageChange = (newPerPage) => {
+        setPerPage(newPerPage)
+        setCurrentPage(1) // Reset to first page when changing per page
+    }
+
+    // Filter handlers that reset pagination
+    const handleSearchChange = (value) => {
+        setSearchTerm(value)
+        setCurrentPage(1)
+        // Debounce the API call
+        clearTimeout(window.searchTimeout)
+        window.searchTimeout = setTimeout(() => {
+            fetchUsers()
+        }, 500)
+    }
+
+    const handleRoleFilterChange = (value) => {
+        setRoleFilter(value)
+        setCurrentPage(1)
+        fetchUsers()
+    }
+
+    const handleDepartmentFilterChange = (value) => {
+        setDepartmentFilter(value)
+        setCurrentPage(1)
+        fetchUsers()
     }
 
     // Remove full page loading - we'll show skeleton loading instead
@@ -246,7 +299,7 @@ export default function Users({ auth }) {
                                 type="text"
                                 placeholder="Search users..."
                                 value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
+                                onChange={(e) => handleSearchChange(e.target.value)}
                                 className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                             />
                         </div>
@@ -254,7 +307,7 @@ export default function Users({ auth }) {
                             <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                             <select
                                 value={roleFilter}
-                                onChange={(e) => setRoleFilter(e.target.value)}
+                                onChange={(e) => handleRoleFilterChange(e.target.value)}
                                 className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                             >
                                 <option value="">All Roles</option>
@@ -267,7 +320,7 @@ export default function Users({ auth }) {
                             <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
                             <select
                                 value={departmentFilter}
-                                onChange={(e) => setDepartmentFilter(e.target.value)}
+                                onChange={(e) => handleDepartmentFilterChange(e.target.value)}
                                 className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                             >
                                 <option value="">All Departments</option>
@@ -446,6 +499,19 @@ export default function Users({ auth }) {
                                 : 'Get started by adding your first user'
                             }
                         </p>
+                    </div>
+                )}
+
+                {/* Pagination */}
+                {!loading && pagination && (
+                    <div className="mt-6">
+                        <Pagination
+                            pagination={pagination}
+                            onPageChange={handlePageChange}
+                            onPerPageChange={handlePerPageChange}
+                            perPageOptions={[10, 25, 50]}
+                            className="bg-white p-4 rounded-lg shadow-sm"
+                        />
                     </div>
                 )}
 
