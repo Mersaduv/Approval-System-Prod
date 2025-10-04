@@ -11,6 +11,7 @@ class Notification extends Model
 
     protected $fillable = [
         'request_id',
+        'leave_request_id',
         'receiver_id',
         'channel',
         'message',
@@ -26,5 +27,10 @@ class Notification extends Model
     public function receiver()
     {
         return $this->belongsTo(User::class, 'receiver_id')->withTrashed();
+    }
+
+    public function leaveRequest()
+    {
+        return $this->belongsTo(LeaveRequest::class);
     }
 }

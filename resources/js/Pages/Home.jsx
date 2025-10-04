@@ -14,19 +14,31 @@ export default function Home({ auth }) {
         pendingApprovals: 0
     })
     const [recentRequests, setRecentRequests] = useState([])
+    const [recentLeaveRequests, setRecentLeaveRequests] = useState([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [activeTab, setActiveTab] = useState('regular')
 
     const fetchDashboardData = async () => {
         setLoading(true)
         setError(null)
         try {
-            const response = await axios.get('/api/dashboard/stats')
-            if (response.data.success) {
-                setStats(response.data.data.stats)
-                setRecentRequests(response.data.data.recentRequests)
-            } else {
-                setError('Failed to fetch dashboard data')
+            // Fetch regular requests
+            const regularResponse = await axios.get('/api/requests?limit=5')
+            if (regularResponse.data.success) {
+                setRecentRequests(regularResponse.data.data || [])
+            }
+
+            // Fetch leave requests
+            const leaveResponse = await axios.get('/api/leave-requests?limit=5')
+            if (leaveResponse.data.success) {
+                setRecentLeaveRequests(leaveResponse.data.data || [])
+            }
+
+            // Fetch dashboard stats
+            const statsResponse = await axios.get('/api/dashboard/stats')
+            if (statsResponse.data.success) {
+                setStats(statsResponse.data.data.stats)
             }
         } catch (error) {
             console.error('Error fetching dashboard data:', error)
@@ -41,6 +53,7 @@ export default function Home({ auth }) {
                 pendingApprovals: 0
             })
             setRecentRequests([])
+            setRecentLeaveRequests([])
         } finally {
             setLoading(false)
         }
@@ -96,6 +109,37 @@ export default function Home({ auth }) {
             case 'delivered': return 'bg-green-100 text-green-800'
             case 'cancelled': return 'bg-gray-100 text-gray-800'
             default: return 'bg-gray-100 text-gray-800'
+        }
+    }
+
+    const formatDateWithDay = (dateString) => {
+        if (!dateString) return '';
+
+        try {
+            const date = new Date(dateString);
+            const options = {
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            };
+            return date.toLocaleDateString('en-US', options);
+        } catch (error) {
+            return dateString;
+        }
+    }
+
+    const calculateDays = (startDate, endDate) => {
+        if (!startDate || !endDate) return 0;
+
+        try {
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const diffTime = Math.abs(end - start);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // +1 to include both start and end dates
+            return diffDays;
+        } catch (error) {
+            return 0;
         }
     }
 
@@ -325,14 +369,36 @@ export default function Home({ auth }) {
                         <div className="px-4 lg:px-6 py-4 border-b border-gray-200">
                             <div className="flex items-center justify-between">
                                 <h3 className="text-base lg:text-lg font-medium text-gray-900">Recent Requests</h3>
-                                <Link
-                                    href="/requests"
-                                    className="text-xs lg:text-sm text-blue-600 hover:text-blue-800"
-                                >
-                                    View all
-                                </Link>
+
                             </div>
                         </div>
+
+                        {/* Request Type Tabs */}
+                        <div className="px-4 lg:px-6 py-3 border-b border-gray-200">
+                            <nav className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+                                <button
+                                    onClick={() => setActiveTab('regular')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                        activeTab === 'regular'
+                                            ? 'bg-white text-blue-600 shadow-sm'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                    }`}
+                                >
+                                    Requests
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('leave')}
+                                    className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                        activeTab === 'leave'
+                                            ? 'bg-white text-blue-600 shadow-sm'
+                                            : 'text-gray-600 hover:text-gray-900'
+                                    }`}
+                                >
+                                    Leave Requests
+                                </button>
+                            </nav>
+                        </div>
+
                         <div className="p-4 lg:p-6">
                             <div className="space-y-4">
                                 {loading ? (
@@ -348,23 +414,82 @@ export default function Home({ auth }) {
                                         ))}
                                     </div>
                                 ) : (
-                                    recentRequests.map((request) => (
-                                        <div key={request.id} className="flex items-center justify-between">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="text-sm font-medium text-gray-900 truncate">
-                                                    {request.item}
-                                                </p>
-                                                <p className="text-sm text-gray-500">
-                                                    {request.amount.toLocaleString()} AFN • {request.employee_name}
-                                                </p>
+                                    <>
+                                        {/* Regular Requests Tab */}
+                                        {activeTab === 'regular' && (
+                                            <div className="space-y-3">
+                                                {recentRequests.length > 0 ? (
+                                                    recentRequests.map((request) => (
+                                                        <div key={request.id} className="p-4 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 hover:border-gray-300 transition-all duration-200">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-sm font-semibold text-gray-900 truncate mb-1">
+                                                                        {request.item}
+                                                                    </p>
+                                                                    <p className="text-sm text-gray-600">
+                                                                        <span className="font-medium">{request.amount.toLocaleString()} AFN</span>
+                                                                    </p>
+                                                                    <p className="text-xs text-gray-500">
+                                                                        {request.employee_name}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center space-x-2 ml-4">
+                                                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
+                                                                        {getStatusDisplayText(request.status, request)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="text-center py-8">
+                                                        <div className="p-4 bg-gray-50 rounded-lg">
+                                                            <p className="text-sm text-gray-500">No recent requests</p>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div className="flex items-center space-x-2">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
-                                                    {getStatusDisplayText(request.status, request)}
-                                                </span>
+                                        )}
+
+                                        {/* Leave Requests Tab */}
+                                        {activeTab === 'leave' && (
+                                            <div className="space-y-3">
+                                                {recentLeaveRequests.length > 0 ? (
+                                                    recentLeaveRequests.map((request) => (
+                                                        <div key={request.id} className="p-4 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 hover:border-gray-300 transition-all duration-200">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-sm font-semibold text-gray-900 truncate mb-1">
+                                                                        {request.reason}
+                                                                    </p>
+                                                                    <p className="text-sm text-gray-600">
+                                                                        <span className="font-medium">{formatDateWithDay(request.start_date)}</span> to <span className="font-medium">{formatDateWithDay(request.end_date)}</span>
+                                                                    </p>
+                                                                    <p className="text-xs text-gray-500">
+                                                                        {calculateDays(request.start_date, request.end_date)} day{calculateDays(request.start_date, request.end_date) !== 1 ? 's' : ''}
+                                                                    </p>
+                                                                    <p className="text-xs text-gray-500">
+                                                                        {request.employee_name}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center space-x-2 ml-4">
+                                                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status, request)}`}>
+                                                                        {getStatusDisplayText(request.status, request)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    ))
+                                                ) : (
+                                                    <div className="text-center py-8">
+                                                        <div className="p-4 bg-gray-50 rounded-lg">
+                                                            <p className="text-sm text-gray-500">No recent leave requests</p>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
-                                    ))
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>

@@ -3,11 +3,14 @@
 namespace App\Services;
 
 use App\Models\Request as RequestModel;
+use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Models\Notification;
 use App\Models\ApprovalToken;
 use App\Mail\ApprovalNotificationMail;
 use App\Mail\EmployeeNotificationMail;
+use App\Mail\LeaveApprovalNotificationMail;
+use App\Mail\LeaveEmployeeNotificationMail;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 
@@ -146,6 +149,133 @@ class NotificationService
     }
 
     /**
+     * Send in-app notification for leave requests
+     */
+    public function sendLeaveInAppNotification(LeaveRequest $leaveRequest, int $receiverId, string $title, string $message): void
+    {
+        Notification::create([
+            'leave_request_id' => $leaveRequest->id,
+            'receiver_id' => $receiverId,
+            'channel' => 'InApp',
+            'message' => $message,
+            'link' => "/leave-requests/{$leaveRequest->id}",
+            'status' => 'Unread'
+        ]);
+    }
+
+    /**
+     * Send leave request approval notification to approver
+     */
+    public function sendLeaveApprovalRequest(LeaveRequest $leaveRequest, User $approver, string $message, string $stepName = null): void
+    {
+        // Create approval token (never expires)
+        $approvalToken = ApprovalToken::createToken($leaveRequest->id, $approver->id, 'approve');
+
+        // Send in-app notification
+        $this->sendLeaveInAppNotification(
+            $leaveRequest,
+            $approver->id,
+            'Approval Required',
+            $message
+        );
+
+        // Send email notification
+        try {
+            Mail::to($approver->email)->send(new LeaveApprovalNotificationMail($leaveRequest, $approver, $approvalToken, 'approve', $stepName));
+        } catch (\Exception $e) {
+            Log::error('Failed to send leave approval email: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Send notification to employee about leave request status change
+     */
+    public function sendLeaveEmployeeNotification(LeaveRequest $leaveRequest, string $status, string $reason = null): void
+    {
+        $employee = $leaveRequest->employee;
+
+        // Send in-app notification
+        $message = $this->getLeaveEmployeeMessage($leaveRequest, $status, $reason);
+        $this->sendLeaveInAppNotification(
+            $leaveRequest,
+            $employee->id,
+            $this->getLeaveEmployeeTitle($status),
+            $message
+        );
+
+        // Send email notification
+        try {
+            Mail::to($employee->email)->send(new LeaveEmployeeNotificationMail($leaveRequest, $employee, $status, $reason));
+        } catch (\Exception $e) {
+            Log::error('Failed to send leave employee notification: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Get leave employee message
+     */
+    private function getLeaveEmployeeMessage(LeaveRequest $leaveRequest, string $status, string $reason = null): string
+    {
+        $baseMessage = match($status) {
+            'approved' => "Your leave request has been approved.",
+            'rejected' => "Your leave request has been rejected.",
+            'cancelled' => "Your leave request has been cancelled.",
+            'workflow_update' => "Your leave request workflow has been updated.",
+            default => "Your leave request status has been updated."
+        };
+
+        if ($reason && $status === 'rejected') {
+            $baseMessage .= " Reason: {$reason}";
+        }
+
+        return $baseMessage;
+    }
+
+    /**
+     * Get leave employee title
+     */
+    private function getLeaveEmployeeTitle(string $status): string
+    {
+        return match($status) {
+            'approved' => 'Leave Request Approved',
+            'rejected' => 'Leave Request Rejected',
+            'cancelled' => 'Leave Request Cancelled',
+            'workflow_update' => 'Leave Request Workflow Update',
+            default => 'Leave Request Update'
+        };
+    }
+
+    /**
+     * Send leave request workflow step update notification to employee
+     */
+    public function sendLeaveWorkflowStepUpdate(LeaveRequest $leaveRequest, string $stepName, string $action, string $performerName, string $notes = null): void
+    {
+        $employee = $leaveRequest->employee;
+
+        // Prepare message based on action
+        $message = $this->getLeaveWorkflowStepMessage($stepName, $action, $performerName, $notes);
+        $title = $this->getLeaveWorkflowStepTitle($action);
+
+        // Send in-app notification
+        $this->sendLeaveInAppNotification(
+            $leaveRequest,
+            $employee->id,
+            $title,
+            $message
+        );
+
+        // Get current workflow status and next step info
+        $workflowInfo = $this->getLeaveWorkflowInfoForEmail($leaveRequest, $stepName, $action);
+
+        // Send email notification with enhanced details
+        try {
+            Mail::to($employee->email)->send(new LeaveEmployeeNotificationMail($leaveRequest, $employee, 'workflow_update', $message, $workflowInfo));
+        } catch (\Exception $e) {
+            Log::error('Failed to send leave workflow step update email: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Send workflow step update notification to request creator
      */
     public function sendWorkflowStepUpdate(RequestModel $request, string $stepName, string $action, string $performerName, string $notes = null): void
@@ -173,6 +303,130 @@ class NotificationService
         } catch (\Exception $e) {
             Log::error('Failed to send workflow step update email: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Get leave workflow step message
+     */
+    private function getLeaveWorkflowStepMessage(string $stepName, string $action, string $performerName, string $notes = null): string
+    {
+        $baseMessage = match($action) {
+            'started' => "Step '{$stepName}' has been started by {$performerName}",
+            'completed' => "Step '{$stepName}' has been completed by {$performerName}",
+            'rejected' => "Step '{$stepName}' has been rejected by {$performerName}",
+            'approved' => "Step '{$stepName}' has been approved by {$performerName}",
+            'verified' => "Step '{$stepName}' has been verified by {$performerName}",
+            'ordered' => "Step '{$stepName}' has been ordered by {$performerName}",
+            'delivered' => "Step '{$stepName}' has been delivered by {$performerName}",
+            'cancelled' => "Step '{$stepName}' has been cancelled by {$performerName}",
+            default => "Step '{$stepName}' has been updated by {$performerName}"
+        };
+
+        if ($notes) {
+            $baseMessage .= ". Notes: {$notes}";
+        }
+
+        return $baseMessage;
+    }
+
+    /**
+     * Get leave workflow step title
+     */
+    private function getLeaveWorkflowStepTitle(string $action): string
+    {
+        return match($action) {
+            'started' => 'Leave Request Workflow Step Started',
+            'completed' => 'Leave Request Workflow Step Completed',
+            'rejected' => 'Leave Request Workflow Step Rejected',
+            'approved' => 'Leave Request Workflow Step Approved',
+            'verified' => 'Leave Request Workflow Step Verified',
+            'ordered' => 'Leave Request Workflow Step Ordered',
+            'delivered' => 'Leave Request Workflow Step Delivered',
+            'cancelled' => 'Leave Request Workflow Step Cancelled',
+            default => 'Leave Request Workflow Step Update'
+        };
+    }
+
+    /**
+     * Get leave workflow information for email
+     */
+    private function getLeaveWorkflowInfoForEmail(LeaveRequest $leaveRequest, string $stepName, string $action): array
+    {
+        $workflowInfo = [
+            'current_step' => $stepName,
+            'action' => $action,
+            'performer' => $action,
+            'notes' => null,
+            'workflow_progress' => null,
+            'completed_steps' => [],
+            'pending_steps' => [],
+            'next_step' => null
+        ];
+
+        // Get workflow steps for leave requests
+        $steps = \App\Models\WorkflowStep::where('step_category', 'leave')
+            ->where('is_active', true)
+            ->orderBy('order_index')
+            ->get();
+
+        if ($steps->isNotEmpty()) {
+            $totalSteps = $steps->count();
+            $completedSteps = 0;
+
+            // Count completed steps based on audit logs
+            foreach ($steps as $step) {
+                $isCompleted = $leaveRequest->auditLogs()
+                    ->where('action', 'like', '%approved%')
+                    ->where('notes', 'like', '%' . $step->name . '%')
+                    ->exists();
+
+                if ($isCompleted) {
+                    $completedSteps++;
+                }
+            }
+
+            $workflowInfo['workflow_progress'] = [
+                'completed' => $completedSteps,
+                'total' => $totalSteps,
+                'percentage' => $totalSteps > 0 ? round(($completedSteps / $totalSteps) * 100) : 0
+            ];
+
+            // Get completed steps
+            foreach ($steps as $step) {
+                $isCompleted = $leaveRequest->auditLogs()
+                    ->where('action', 'like', '%approved%')
+                    ->where('notes', 'like', '%' . $step->name . '%')
+                    ->exists();
+
+                if ($isCompleted) {
+                    $workflowInfo['completed_steps'][] = [
+                        'name' => $step->name,
+                        'description' => $step->description,
+                        'completed_at' => $leaveRequest->updated_at->format('M d, Y H:i')
+                    ];
+                } else {
+                    $workflowInfo['pending_steps'][] = [
+                        'name' => $step->name,
+                        'description' => $step->description,
+                        'is_current' => $step->name === $stepName
+                    ];
+                }
+            }
+
+            // Get next step
+            $nextStep = $steps->first(function($step) use ($stepName) {
+                return $step->name !== $stepName;
+            });
+
+            if ($nextStep) {
+                $workflowInfo['next_step'] = [
+                    'name' => $nextStep->name,
+                    'description' => $nextStep->description
+                ];
+            }
+        }
+
+        return $workflowInfo;
     }
 
     /**

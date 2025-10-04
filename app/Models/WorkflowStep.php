@@ -61,11 +61,23 @@ class WorkflowStep extends Model
     /**
      * Get active workflow steps ordered by order_index
      */
-    public static function getActiveSteps()
+    public static function getActiveSteps($category = null)
     {
-        return self::where('is_active', true)
-            ->orderBy('order_index')
-            ->get();
+        $query = self::where('is_active', true);
+
+        if ($category) {
+            if ($category === 'regular') {
+                $query->where(function($q) {
+                    $q->whereNull('step_category')
+                      ->orWhere('step_category', '')
+                      ->orWhere('step_category', 'regular');
+                });
+            } else {
+                $query->where('step_category', $category);
+            }
+        }
+
+        return $query->orderBy('order_index')->get();
     }
 
     /**
@@ -73,7 +85,9 @@ class WorkflowStep extends Model
      */
     public static function getStepsForRequest($request)
     {
-        $steps = self::getActiveSteps();
+        // Determine request category
+        $category = self::getRequestCategory($request);
+        $steps = self::getActiveSteps($category);
         $applicableSteps = [];
 
         // Check if the request creator is admin or procurement
@@ -104,7 +118,9 @@ class WorkflowStep extends Model
      */
     public static function getAllStepsForRequest($request)
     {
-        $steps = self::getActiveSteps();
+        // Determine request category
+        $category = self::getRequestCategory($request);
+        $steps = self::getActiveSteps($category);
         $applicableSteps = [];
 
         // Check if the request creator is admin or procurement
@@ -123,6 +139,28 @@ class WorkflowStep extends Model
         }
 
         return collect($applicableSteps);
+    }
+
+    /**
+     * Determine the category of a request
+     */
+    public static function getRequestCategory($request)
+    {
+        // Check if this is a leave request
+        if ($request instanceof \App\Models\LeaveRequest) {
+            return 'leave';
+        }
+
+        // Check if the request has a leave_request_id (for regular requests linked to leave requests)
+        if (isset($request->leave_request_id) && $request->leave_request_id) {
+            return 'leave';
+        }
+
+        // Check if this is related to leave requests by checking the request type or other indicators
+        // You can add more logic here based on your specific requirements
+
+        // Default to regular requests
+        return 'regular';
     }
 
     /**
@@ -201,16 +239,19 @@ class WorkflowStep extends Model
                     $users->push($user);
                 }
             } elseif ($assignment->assignable_type === 'App\\Models\\Role') {
-                $roleUsers = User::whereHas('role', function($query) use ($assignment) {
-                    $query->where('id', $assignment->assignable_id);
-                });
+                $role = \App\Models\Role::find($assignment->assignable_id);
+                if ($role) {
+                    $roleUsers = User::whereHas('role', function($query) use ($role) {
+                        $query->where('name', $role->name);
+                    });
 
-                // If request is provided and role is manager, filter by department
-                if ($request && $assignment->assignable_id == 2) { // Role ID 2 is manager
-                    $roleUsers->where('department_id', $request->employee->department_id);
+                    // If request is provided and role is manager, filter by department
+                    if ($request && $role->name === 'manager' && $request->employee) {
+                        $roleUsers->where('department_id', $request->employee->department_id);
+                    }
+
+                    $users = $users->merge($roleUsers->get());
                 }
-
-                $users = $users->merge($roleUsers->get());
             } elseif ($assignment->assignable_type === 'App\\Models\\Department') {
                 $deptUsers = User::where('department_id', $assignment->assignable_id)->get();
                 $users = $users->merge($deptUsers);

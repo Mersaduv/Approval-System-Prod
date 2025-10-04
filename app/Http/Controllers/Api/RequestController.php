@@ -50,41 +50,39 @@ class RequestController extends Controller
                         $q->whereHas('employee', function($empQuery) use ($user) {
                             $empQuery->where('department_id', $user->department_id);
                         })
-                        // OR show requests assigned to their department in workflow steps (any status)
-                        ->orWhere(function($workflowQuery) use ($user) {
-                            $workflowQuery->whereExists(function($subQuery) use ($user) {
-                                $subQuery->select(DB::raw(1))
-                                    ->from('workflow_steps')
-                                    ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                    ->where('workflow_step_assignments.assignable_type', 'App\\Models\\Department')
-                                    ->where('workflow_step_assignments.assignable_id', $user->department_id)
-                                    ->where('workflow_steps.is_active', true);
-                            });
-                        })
-                        // OR show requests assigned to them personally in workflow steps (any status)
+                        // OR show requests assigned to them personally in workflow steps (from any department)
                         ->orWhere(function($personalQuery) use ($user) {
-                            $personalQuery->whereExists(function($subQuery) use ($user) {
-                                $subQuery->select(DB::raw(1))
-                                    ->from('workflow_steps')
-                                    ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
-                                    ->where('workflow_steps.is_active', true)
-                                    ->where(function($assignmentQuery) use ($user) {
-                                        $assignmentQuery->where(function($userQuery) use ($user) {
-                                            $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
-                                                ->where('workflow_step_assignments.assignable_id', $user->id);
+                            $personalQuery->whereIn('status', ['Pending Approval', 'Approved', 'Pending Procurement', 'Ordered', 'Delivered', 'Cancelled'])
+                                ->whereExists(function($subQuery) use ($user) {
+                                    $subQuery->select(DB::raw(1))
+                                        ->from('workflow_steps')
+                                        ->join('workflow_step_assignments', 'workflow_steps.id', '=', 'workflow_step_assignments.workflow_step_id')
+                                        ->where('workflow_steps.is_active', true)
+                                        ->where(function($assignmentQuery) use ($user) {
+                                            $assignmentQuery->where(function($userQuery) use ($user) {
+                                                $userQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\User')
+                                                    ->where('workflow_step_assignments.assignable_id', $user->id);
+                                            })
+                                            ->orWhere(function($financeQuery) use ($user) {
+                                                $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
+                                                    ->whereExists(function($financeSubQuery) use ($user) {
+                                                        $financeSubQuery->select(DB::raw(1))
+                                                            ->from('finance_assignments')
+                                                            ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
+                                                            ->where('finance_assignments.user_id', $user->id)
+                                                            ->where('finance_assignments.is_active', true);
+                                                    });
+                                            });
                                         })
-                                        ->orWhere(function($financeQuery) use ($user) {
-                                            $financeQuery->where('workflow_step_assignments.assignable_type', 'App\\Models\\FinanceAssignment')
-                                                ->whereExists(function($financeSubQuery) use ($user) {
-                                                    $financeSubQuery->select(DB::raw(1))
-                                                        ->from('finance_assignments')
-                                                        ->whereColumn('finance_assignments.id', 'workflow_step_assignments.assignable_id')
-                                                        ->where('finance_assignments.user_id', $user->id)
-                                                        ->where('finance_assignments.is_active', true);
-                                                });
+                                        // Only show requests that are currently at this workflow step
+                                        ->whereNotExists(function($completedQuery) {
+                                            $completedQuery->select(DB::raw(1))
+                                                ->from('audit_logs')
+                                                ->whereColumn('audit_logs.request_id', 'requests.id')
+                                                ->where('audit_logs.action', 'Step completed')
+                                                ->whereRaw('audit_logs.notes LIKE CONCAT("%", workflow_steps.name, "%")');
                                         });
-                                    });
-                            });
+                                });
                         });
                     });
                 } else {
@@ -132,6 +130,14 @@ class RequestController extends Controller
                                                             ->where('finance_assignments.is_active', true);
                                                     });
                                             });
+                                        })
+                                        // Only show requests that are currently at this workflow step
+                                        ->whereNotExists(function($completedQuery) {
+                                            $completedQuery->select(DB::raw(1))
+                                                ->from('audit_logs')
+                                                ->whereColumn('audit_logs.request_id', 'requests.id')
+                                                ->where('audit_logs.action', 'Step completed')
+                                                ->whereRaw('audit_logs.notes LIKE CONCAT("%", workflow_steps.name, "%")');
                                         });
                                 });
                         });
@@ -3302,85 +3308,5 @@ class RequestController extends Controller
         }
 
         return $query->whereIn('status', ['Pending', 'Pending Approval', 'Pending Procurement Verification'])->count();
-    }
-
-    /**
-     * Bulk delete requests
-     */
-    public function bulkDelete(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'request_ids' => 'required|array|min:1',
-            'request_ids.*' => 'required|integer|exists:requests,id'
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
-        $user = Auth::user();
-        $requestIds = $request->input('request_ids');
-
-        try {
-            DB::beginTransaction();
-
-            // Get the requests to be deleted
-            $requestsQuery = RequestModel::whereIn('id', $requestIds);
-
-            // Apply authorization rules
-            if ($user->role->name !== 'admin') {
-                // Non-admin users can only delete their own requests
-                $requestsQuery->where('employee_id', $user->id);
-            }
-
-            $requestsToDelete = $requestsQuery->get();
-
-            if ($requestsToDelete->isEmpty()) {
-                DB::rollBack();
-                return response()->json([
-                    'success' => false,
-                    'message' => 'No requests found or you do not have permission to delete these requests'
-                ], 403);
-            }
-
-            $deletedIds = $requestsToDelete->pluck('id')->toArray();
-
-            // Delete related data in the correct order to avoid foreign key constraints
-            // Delete notifications
-            DB::table('notifications')->whereIn('request_id', $deletedIds)->delete();
-
-            // Delete audit logs
-            DB::table('audit_logs')->whereIn('request_id', $deletedIds)->delete();
-
-            // Delete procurements
-            DB::table('procurements')->whereIn('request_id', $deletedIds)->delete();
-
-            // Delete approval tokens
-            DB::table('approval_tokens')->whereIn('request_id', $deletedIds)->delete();
-
-            // Finally delete the requests
-            RequestModel::whereIn('id', $deletedIds)->delete();
-
-            DB::commit();
-
-            return response()->json([
-                'success' => true,
-                'message' => count($deletedIds) . ' request(s) deleted successfully',
-                'deleted_count' => count($deletedIds),
-                'deleted_ids' => $deletedIds
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to delete requests: ' . $e->getMessage()
-            ], 500);
-        }
     }
 }
