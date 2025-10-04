@@ -1152,202 +1152,245 @@ export default function WorkflowSettings({ auth }) {
 
                                             {/* Regular Requests Assignments */}
                                             {currentCategory !== 'leave' && stepForm.assignments.map((assignment, index) => (
-                                                <div key={index} className="flex gap-2 mb-2">
-                                                    <select
-                                                        value={assignment.assignment_type}
-                                                        onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
-                                                        className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                            !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                        }`}
-                                                        required
-                                                    >
-                                                        <option value="">Select Assignment Type *</option>
-                                                        <option value="admin">Admin</option>
-                                                        <option value="manager">Manager</option>
-                                                        <option value="finance">Finance</option>
-                                                        <option value="procurement">Procurement</option>
-                                                        <option value="user">User</option>
-                                                    </select>
-
-                                                    {assignment.assignment_type === 'user' && (
-                                                        <select
-                                                            value={assignment.user_id}
-                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                            }`}
-                                                            required
-                                                        >
-                                                            <option value="">Select User *</option>
-                                                            {assignableEntities.users.map(user => (
-                                                                <option key={user.id} value={user.id}>
-                                                                    {user.name} ({user.email})
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    )}
-
-                                                    {assignment.assignment_type === 'finance' && (
-                                                        <select
-                                                            value={assignment.user_id}
-                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                            }`}
-                                                            required
-                                                        >
-                                                            <option value="">Select Finance User *</option>
-                                                            {assignableEntities.users
-                                                                .filter(user => user.department_name === 'Finance')
-                                                                .map(user => (
-                                                                    <option key={user.id} value={user.id}>
-                                                                        {user.name} ({user.email})
-                                                                    </option>
-                                                                ))}
-                                                        </select>
-                                                    )}
-
-                                                    <div className="checkbox-container assignment-checkbox">
-                                                        <div className="custom-checkbox">
-                                                            <input
-                                                                type="checkbox"
-                                                                id={`assignment_required_${index}`}
-                                                                checked={assignment.is_required}
-                                                                onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
-                                                            />
-                                                            <span className="checkmark"></span>
+                                                <div key={index} className="space-y-3 mb-4 p-3 bg-gray-50 rounded-lg">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                Assignment Type *
+                                                            </label>
+                                                            <select
+                                                                value={assignment.assignment_type}
+                                                                onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
+                                                                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                    !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                                }`}
+                                                                required
+                                                            >
+                                                                <option value="">Select Assignment Type *</option>
+                                                                <option value="admin">Admin</option>
+                                                                <option value="manager">Manager</option>
+                                                                <option value="finance">Finance</option>
+                                                                <option value="procurement">Procurement</option>
+                                                                <option value="user">User</option>
+                                                            </select>
                                                         </div>
-                                                        <label
-                                                            htmlFor={`assignment_required_${index}`}
-                                                            className="checkbox-label"
-                                                        >
-                                                            Required
-                                                        </label>
+
+                                                        {assignment.assignment_type === 'user' && (
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                    Select User *
+                                                                </label>
+                                                                <select
+                                                                    value={assignment.user_id}
+                                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                                    }`}
+                                                                    required
+                                                                >
+                                                                    <option value="">Select User *</option>
+                                                                    {assignableEntities.users.map(user => (
+                                                                        <option key={user.id} value={user.id}>
+                                                                            {user.name} ({user.email})
+                                                                        </option>
+                                                                    ))}
+                                                                </select>
+                                                            </div>
+                                                        )}
+
+                                                        {assignment.assignment_type === 'finance' && (
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                    Select Finance User *
+                                                                </label>
+                                                                <select
+                                                                    value={assignment.user_id}
+                                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                                    }`}
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Finance User *</option>
+                                                                    {assignableEntities.users
+                                                                        .filter(user => user.department_name === 'Finance')
+                                                                        .map(user => (
+                                                                            <option key={user.id} value={user.id}>
+                                                                                {user.name} ({user.email})
+                                                                            </option>
+                                                                        ))}
+                                                                </select>
+                                                            </div>
+                                                        )}
                                                     </div>
 
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeAssignment(index)}
-                                                        className="text-red-600 hover:text-red-800 p-1"
-                                                    >
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                        </svg>
-                                                    </button>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="checkbox-container assignment-checkbox">
+                                                            <div className="custom-checkbox">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    id={`assignment_required_${index}`}
+                                                                    checked={assignment.is_required}
+                                                                    onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
+                                                                />
+                                                                <span className="checkmark"></span>
+                                                            </div>
+                                                            <label
+                                                                htmlFor={`assignment_required_${index}`}
+                                                                className="checkbox-label"
+                                                            >
+                                                                Required
+                                                            </label>
+                                                        </div>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeAssignment(index)}
+                                                            className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded-md transition-colors"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ))}
 
                                             {/* Leave Requests Assignments */}
                                             {currentCategory === 'leave' && stepForm.assignments.map((assignment, index) => (
-                                                <div key={index} className="flex gap-2 mb-2">
-                                                    <select
-                                                        value={assignment.assignment_type}
-                                                        onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
-                                                        className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                            !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                        }`}
-                                                        required
-                                                    >
-                                                        <option value="">Select Assignment Type *</option>
-                                                        <option value="admin">Admin</option>
-                                                        <option value="manager">Manager</option>
-                                                        <option value="hr">HR</option>
-                                                    </select>
-
-                                                    {assignment.assignment_type === 'admin' && (
-                                                        <select
-                                                            value={assignment.user_id || ''}
-                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                            }`}
-                                                            required
-                                                        >
-                                                            <option value="">Select Admin User *</option>
-                                                            {assignableEntities.users && assignableEntities.users.length > 0 ? (
-                                                                (() => {
-                                                                    const adminUsers = assignableEntities.users.filter(user => user.role_name === 'admin');
-                                                                    if (adminUsers.length > 0) {
-                                                                        return adminUsers.map(user => (
-                                                                            <option key={user.id} value={String(user.id)}>
-                                                                                {user.name} ({user.email}) - {user.role_name}
-                                                                            </option>
-                                                                        ));
-                                                                    } else {
-                                                                        // Temporary fallback: show all users with their roles for debugging
-                                                                        return assignableEntities.users.map(user => (
-                                                                            <option key={user.id} value={String(user.id)}>
-                                                                                {user.name} ({user.email}) - Role: {user.role_name || 'No Role'}
-                                                                            </option>
-                                                                        ));
-                                                                    }
-                                                                })()
-                                                            ) : (
-                                                                <option value="" disabled>Loading users...</option>
-                                                            )}
-                                                        </select>
-                                                    )}
-
-                                                    {assignment.assignment_type === 'manager' && (
-                                                        <div className="px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-gray-600 flex-1">
-                                                            Department Manager (Auto-assigned based on employee's department)
+                                                <div key={index} className="space-y-3 mb-4 p-3 bg-gray-50 rounded-lg">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                Assignment Type *
+                                                            </label>
+                                                            <select
+                                                                value={assignment.assignment_type}
+                                                                onChange={(e) => updateAssignment(index, 'assignment_type', e.target.value)}
+                                                                className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                    !assignment.assignment_type ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                                }`}
+                                                                required
+                                                            >
+                                                                <option value="">Select Assignment Type *</option>
+                                                                <option value="admin">Admin</option>
+                                                                <option value="manager">Manager</option>
+                                                                <option value="hr">HR</option>
+                                                            </select>
                                                         </div>
-                                                    )}
 
-                                                    {assignment.assignment_type === 'hr' && (
-                                                        <select
-                                                            value={assignment.user_id || ''}
-                                                            onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
-                                                            className={`px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                                                                !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
-                                                            }`}
-                                                            required
-                                                        >
-                                                            <option value="">Select HR User *</option>
-                                                            {assignableEntities.users
-                                                                .filter(user => {
-                                                                    const deptName = user.department_name?.toLowerCase() || '';
-                                                                    return deptName.includes('hr') ||
-                                                                           deptName.includes('human') ||
-                                                                           deptName.includes('resource') ||
-                                                                           deptName.includes('منابع') ||
-                                                                           deptName.includes('انسانی');
-                                                                })
-                                                                .map(user => (
-                                                                    <option key={user.id} value={String(user.id)}>
-                                                                        {user.name} ({user.email}) - {user.department_name}
-                                                                    </option>
-                                                                ))}
-                                                        </select>
-                                                    )}
+                                                        {assignment.assignment_type === 'admin' && (
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                    Select Admin User *
+                                                                </label>
+                                                                <select
+                                                                    value={assignment.user_id || ''}
+                                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                                    }`}
+                                                                    required
+                                                                >
+                                                                    <option value="">Select Admin User *</option>
+                                                                    {assignableEntities.users && assignableEntities.users.length > 0 ? (
+                                                                        (() => {
+                                                                            const adminUsers = assignableEntities.users.filter(user => user.role_name === 'admin');
+                                                                            if (adminUsers.length > 0) {
+                                                                                return adminUsers.map(user => (
+                                                                                    <option key={user.id} value={String(user.id)}>
+                                                                                        {user.name} ({user.email}) - {user.role_name}
+                                                                                    </option>
+                                                                                ));
+                                                                            } else {
+                                                                                // Temporary fallback: show all users with their roles for debugging
+                                                                                return assignableEntities.users.map(user => (
+                                                                                    <option key={user.id} value={String(user.id)}>
+                                                                                        {user.name} ({user.email}) - Role: {user.role_name || 'No Role'}
+                                                                                    </option>
+                                                                                ));
+                                                                            }
+                                                                        })()
+                                                                    ) : (
+                                                                        <option value="" disabled>Loading users...</option>
+                                                                    )}
+                                                                </select>
+                                                            </div>
+                                                        )}
 
-                                                    <div className="checkbox-container assignment-checkbox">
-                                                        <div className="custom-checkbox">
-                                                            <input
-                                                                type="checkbox"
-                                                                id={`assignment_required_${index}`}
-                                                                checked={assignment.is_required}
-                                                                onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
-                                                            />
-                                                            <span className="checkmark"></span>
-                                                        </div>
-                                                        <label
-                                                            htmlFor={`assignment_required_${index}`}
-                                                            className="checkbox-label"
-                                                        >
-                                                            Required
-                                                        </label>
+                                                        {assignment.assignment_type === 'manager' && (
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                    Assignment Info
+                                                                </label>
+                                                                <div className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-gray-600">
+                                                                    Department Manager (Auto-assigned based on employee's department)
+                                                                </div>
+                                                            </div>
+                                                        )}
+
+                                                        {assignment.assignment_type === 'hr' && (
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                                                    Select HR User *
+                                                                </label>
+                                                                <select
+                                                                    value={assignment.user_id || ''}
+                                                                    onChange={(e) => updateAssignment(index, 'user_id', e.target.value)}
+                                                                    className={`w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                                                        !assignment.user_id ? 'border-red-300 bg-red-50' : 'border-gray-300'
+                                                                    }`}
+                                                                    required
+                                                                >
+                                                                    <option value="">Select HR User *</option>
+                                                                    {assignableEntities.users
+                                                                        .filter(user => {
+                                                                            const deptName = user.department_name?.toLowerCase() || '';
+                                                                            return deptName.includes('hr') ||
+                                                                                   deptName.includes('human') ||
+                                                                                   deptName.includes('resource') ||
+                                                                                   deptName.includes('منابع') ||
+                                                                                   deptName.includes('انسانی');
+                                                                        })
+                                                                        .map(user => (
+                                                                            <option key={user.id} value={String(user.id)}>
+                                                                                {user.name} ({user.email}) - {user.department_name}
+                                                                            </option>
+                                                                        ))}
+                                                                </select>
+                                                            </div>
+                                                        )}
                                                     </div>
 
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeAssignment(index)}
-                                                        className="text-red-600 hover:text-red-800 p-1"
-                                                    >
-                                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                                        </svg>
-                                                    </button>
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="checkbox-container assignment-checkbox">
+                                                            <div className="custom-checkbox">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    id={`assignment_required_${index}`}
+                                                                    checked={assignment.is_required}
+                                                                    onChange={(e) => updateAssignment(index, 'is_required', e.target.checked)}
+                                                                />
+                                                                <span className="checkmark"></span>
+                                                            </div>
+                                                            <label
+                                                                htmlFor={`assignment_required_${index}`}
+                                                                className="checkbox-label"
+                                                            >
+                                                                Required
+                                                            </label>
+                                                        </div>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => removeAssignment(index)}
+                                                            className="text-red-600 hover:text-red-800 p-2 hover:bg-red-50 rounded-md transition-colors"
+                                                        >
+                                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                                            </svg>
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ))}
                                         </>
