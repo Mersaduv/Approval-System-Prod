@@ -1,0 +1,8 @@
+Thu 10/02/2025  9:10:27.50 : Starting queue worker 
+^CThu 10/02/2025  9:25:59.90 : Starting queue worker 
+  2025-10-02 04:56:30 App\Listeners\SendRequestSubmittedNotification ......................................... RUNNING
+  2025-10-02 04:56:30 App\Listeners\SendRequestSubmittedNotification .................................... 30.71ms DONE
+  2025-10-02 04:56:30 App\Listeners\SendWorkflowStepNotification ............................................. RUNNING
+  2025-10-02 04:56:30 App\Listeners\SendWorkflowStepNotification ........................................ 72.53ms DONE
+  2025-10-02 04:56:30 App\Mail\ApprovalNotificationMail ...................................................... RUNNING
+  2025-10-02 04:56:35 App\Mail\ApprovalNotificationMail ...................................................... 5s DONE
