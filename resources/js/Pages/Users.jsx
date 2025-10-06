@@ -45,10 +45,14 @@ export default function Users({ auth }) {
         { id: 4, name: 'procurement', description: 'Procurement team member' }
     ]
 
+    // Debounced effect for search
     useEffect(() => {
-        fetchUsers()
-        fetchDepartments()
-    }, [currentPage, perPage])
+        const timeoutId = setTimeout(() => {
+            fetchUsers()
+        }, searchTerm ? 500 : 0) // Only debounce search, not other filters
+
+        return () => clearTimeout(timeoutId)
+    }, [currentPage, perPage, roleFilter, departmentFilter, searchTerm])
 
     useEffect(() => {
         fetchDepartments()
@@ -74,13 +78,20 @@ export default function Users({ auth }) {
                 params.append('search', searchTerm)
             }
 
-            const response = await axios.get(`/api/admin/users?${params.toString()}`)
+            const url = `/api/admin/users?${params.toString()}`
+            console.log('Fetching users with URL:', url)
+            console.log('Filter parameters:', { roleFilter, departmentFilter, searchTerm })
+
+            const response = await axios.get(url)
+            console.log('API Response:', response.data)
+
             if (response.data.success) {
                 setUsers(response.data.data || [])
                 setPagination(response.data.pagination || null)
             }
         } catch (error) {
             console.error('Error fetching users:', error)
+            console.error('Error response:', error.response?.data)
         } finally {
             setLoading(false)
         }
@@ -245,25 +256,21 @@ export default function Users({ auth }) {
 
     // Filter handlers that reset pagination
     const handleSearchChange = (value) => {
+        console.log('Search changed to:', value)
         setSearchTerm(value)
         setCurrentPage(1)
-        // Debounce the API call
-        clearTimeout(window.searchTimeout)
-        window.searchTimeout = setTimeout(() => {
-            fetchUsers()
-        }, 500)
     }
 
     const handleRoleFilterChange = (value) => {
+        console.log('Role filter changed to:', value)
         setRoleFilter(value)
         setCurrentPage(1)
-        fetchUsers()
     }
 
     const handleDepartmentFilterChange = (value) => {
+        console.log('Department filter changed to:', value)
         setDepartmentFilter(value)
         setCurrentPage(1)
-        fetchUsers()
     }
 
     // Remove full page loading - we'll show skeleton loading instead

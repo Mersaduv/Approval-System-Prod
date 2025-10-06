@@ -67,7 +67,7 @@ export default function LeaveRequests({ auth }) {
 
     const canSubmitLeaveRequest = () => {
         const user = auth.user
-        return user && (user.role?.name === 'admin' || user.role?.name === 'manager' || user.role?.name === 'employee')
+        return user && (user.role?.name === 'admin' || user.role?.name === 'manager' || user.role?.name === 'employee' || user.role?.name === 'procurement')
     }
 
     const canViewAllRequests = () => {

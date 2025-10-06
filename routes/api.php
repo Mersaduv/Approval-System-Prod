@@ -91,8 +91,7 @@ Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/delegations/workflow-steps', [DelegationController::class, 'getWorkflowSteps']);
     Route::get('/delegations/stats', [DelegationController::class, 'getStats']);
 
-    // Profile routes
-    Route::post('/validate-current-password', [ProfileController::class, 'validateCurrentPassword']);
+    // Profile routes (moved to web routes for CSRF handling)
 
     // Leave Request routes
     Route::get('/leave-requests', [LeaveRequestController::class, 'index']);

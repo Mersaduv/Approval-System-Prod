@@ -298,6 +298,20 @@ export default function Home({ auth }) {
                             </div>
                         </Link>
 
+                        {/* Leave Requests - Available for all users */}
+                        <Link
+                            href="/leave-requests"
+                            className="flex items-center p-3 lg:p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                            <div className="p-2 bg-purple-100 rounded-lg mr-3">
+                                <span className="text-lg lg:text-xl">📅</span>
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 text-sm lg:text-base">Leave Requests</p>
+                                <p className="text-xs lg:text-sm text-gray-500">Manage leave requests</p>
+                            </div>
+                        </Link>
+
                         {/* Procurement Management - Only for procurement users */}
                         {auth.user?.role?.name === 'procurement' && (
                             <>

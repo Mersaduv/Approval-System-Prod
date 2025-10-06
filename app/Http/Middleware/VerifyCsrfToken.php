@@ -12,6 +12,8 @@ class VerifyCsrfToken extends Middleware
      * @var array<int, string>
      */
     protected $except = [
-        //
+        'profile/validate-current-password',
+        'profile/update',
+        'profile/password',
     ];
 }

@@ -135,4 +135,32 @@ class ProfileController extends Controller
             return back()->withErrors(['error' => 'Failed to update password. Please try again.'])->withInput();
         }
     }
+
+    /**
+     * Validate current password
+     */
+    public function validateCurrentPassword(Request $request)
+    {
+        $user = Auth::user();
+
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $isValid = Hash::check($request->current_password, $user->password);
+
+        return response()->json([
+            'success' => true,
+            'valid' => $isValid,
+            'message' => $isValid ? 'Current password is correct' : 'Current password is incorrect'
+        ]);
+    }
 }
