@@ -57,16 +57,26 @@ export default function Profile({ auth, errors: serverErrors, success }) {
 
         setValidatingCurrentPassword(true)
         try {
-            const response = await fetch('/api/validate-current-password', {
+            // Simple fetch request without CSRF token (excluded from CSRF protection)
+            const response = await fetch('/profile/validate-current-password', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').getAttribute('content'),
-                    'Accept': 'application/json'
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
                 },
-                credentials: 'same-origin', // Include cookies for session
+                credentials: 'same-origin',
                 body: JSON.stringify({ current_password: password })
             })
+
+            if (!response.ok) {
+                console.error('HTTP error:', response.status, response.statusText)
+                const errorText = await response.text()
+                console.error('Error response:', errorText)
+                setCurrentPasswordValid(false)
+                setValidatingCurrentPassword(false)
+                return
+            }
 
             const result = await response.json()
             console.log('Validation response:', result)

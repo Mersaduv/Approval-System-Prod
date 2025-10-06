@@ -88,6 +88,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'index']);
     Route::post('/profile/update', [ProfileController::class, 'updateProfile'])->name('profile.update');
     Route::post('/profile/password', [ProfileController::class, 'updatePassword'])->name('profile.password');
+    Route::post('/profile/validate-current-password', [ProfileController::class, 'validateCurrentPassword'])->name('profile.validate-current-password');
     Route::get('/users', function () {
         return inertia('Users', [
             'auth' => [

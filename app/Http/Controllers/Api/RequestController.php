@@ -3309,4 +3309,86 @@ class RequestController extends Controller
 
         return $query->whereIn('status', ['Pending', 'Pending Approval', 'Pending Procurement Verification'])->count();
     }
+
+    /**
+     * Bulk delete requests
+     */
+    public function bulkDelete(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'request_ids' => 'required|array|min:1',
+            'request_ids.*' => 'required|integer|exists:requests,id'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        $user = Auth::user();
+        $requestIds = $request->input('request_ids');
+
+        try {
+            // Check if user has permission to delete these requests
+            $query = RequestModel::query();
+
+            switch ($user->role->name) {
+                case 'employee':
+                    // Employees can only delete their own requests
+                    $query->where('employee_id', $user->id);
+                    break;
+                case 'manager':
+                    // Managers can delete requests from their department
+                    $query->whereHas('employee', function($empQuery) use ($user) {
+                        $empQuery->where('department_id', $user->department_id);
+                    });
+                    break;
+                case 'admin':
+                    // Admin can delete any request
+                    break;
+                default:
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'You do not have permission to delete requests'
+                    ], 403);
+            }
+
+            // Get the requests that the user can delete
+            $deletableRequests = $query->whereIn('id', $requestIds)->get();
+
+            if ($deletableRequests->count() !== count($requestIds)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'You do not have permission to delete some of the selected requests'
+                ], 403);
+            }
+
+            // Soft delete the requests
+            $deletedCount = RequestModel::whereIn('id', $requestIds)->delete();
+
+            // Log the bulk delete action
+            AuditLog::create([
+                'user_id' => $user->id,
+                'request_id' => null,
+                'action' => 'Bulk Delete',
+                'details' => "Bulk deleted {$deletedCount} requests",
+                'notes' => "Request IDs: " . implode(', ', $requestIds)
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Successfully deleted {$deletedCount} request(s)",
+                'deleted_count' => $deletedCount
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete requests: ' . $e->getMessage()
+            ], 500);
+        }
+    }
 }
